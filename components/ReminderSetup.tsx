@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { smsAddress } from '@/lib/reminders';
 import type { Settings } from '@/lib/types';
 
-interface TestResult { kind: string; to: string; ok: boolean; error?: string }
+interface TestResult { sent: number; errors: string[] }
 
 /** Asks where reminders should go and lets the user prove it works. */
 export default function ReminderSetup({ onNeedLogin }: { onNeedLogin?: () => void }) {
@@ -12,7 +12,7 @@ export default function ReminderSetup({ onNeedLogin }: { onNeedLogin?: () => voi
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
-  const [results, setResults] = useState<TestResult[] | null>(null);
+  const [results, setResults] = useState<TestResult | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch('/api/settings');
@@ -43,7 +43,7 @@ export default function ReminderSetup({ onNeedLogin }: { onNeedLogin?: () => voi
     const d = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) return setMsg(d.error || 'Test failed.');
-    setResults(d.results);
+    setResults(d);
   };
 
   if (!configured) {
@@ -64,11 +64,8 @@ export default function ReminderSetup({ onNeedLogin }: { onNeedLogin?: () => voi
       <span className="muted">Reminders: {[hasEmail && `email to ${s.email}`, hasText && 'text'].filter(Boolean).join(' + ')}</span>
       <button className="btn ghost" onClick={test} disabled={busy}>{busy ? 'Sending…' : 'Send test reminder'}</button>
       {msg && <div className="err">{msg}</div>}
-      {results?.map((r, i) => (
-        <div key={i} className={r.ok ? 'good' : 'err'}>
-          {r.ok ? `Sent to your ${r.kind}. Check your inbox.` : `${r.kind === 'text' ? 'Text' : 'Email'} failed: ${r.error}`}
-        </div>
-      ))}
+      {results && results.sent > 0 && <div className="good">Test digest sent. Check your inbox.</div>}
+      {results?.errors.map((e, i) => <div key={i} className="err">{e}</div>)}
     </div>
   );
 }

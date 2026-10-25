@@ -107,3 +107,29 @@ describe('week', () => {
     expect(matchesDate(T({ due: today, done: true }), today)).toBe(false);
   });
 });
+
+import { buildDigest } from '../lib/reminders';
+
+describe('digest', () => {
+  it('returns null when nothing is due', () => {
+    expect(buildDigest([], today)).toBeNull();
+  });
+  it('groups by day, puts exams before assignments, and names the count', () => {
+    const d = buildDigest(
+      [T({ title: 'HW', due: '2026-10-26' }), T({ title: 'Chem quiz', type: 'quiz', due: '2026-10-26' }), T({ title: 'Essay', due: today }), T({ title: 'Exam', type: 'exam', due: '2026-10-28' })],
+      today,
+    )!;
+    expect(d.subject).toBe('4 things due soon');
+    expect(d.text.indexOf('Due today')).toBeLessThan(d.text.indexOf('Due tomorrow'));
+    expect(d.text.indexOf('Due tomorrow')).toBeLessThan(d.text.indexOf('Coming up'));
+    expect(d.text.indexOf('Chem quiz')).toBeLessThan(d.text.indexOf('HW'));
+    expect(d.text).toContain('EXAM: Exam (Wed)');
+  });
+  it('uses singular wording and keeps the text short with "+N more"', () => {
+    expect(buildDigest([T({ due: today })], today)!.subject).toBe('1 thing due soon');
+    const many = Array.from({ length: 12 }, (_, i) => T({ title: `Assignment number ${i + 1}`, due: today }));
+    const d = buildDigest(many, today)!;
+    expect(d.sms.length).toBeLessThanOrEqual(160);
+    expect(d.sms).toMatch(/\+\d+ more$/);
+  });
+});

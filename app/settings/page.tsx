@@ -29,8 +29,7 @@ export default function SettingsPage() {
     const res = await fetch('/api/settings/test', { method: 'POST' });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) return setTestMsg([d.error || 'Test failed.']);
-    setTestMsg(d.results.map((r: { kind: string; ok: boolean; error?: string }) =>
-      r.ok ? `Sent to your ${r.kind}. Check it now.` : `${r.kind === 'text' ? 'Text' : 'Email'} failed: ${r.error}`));
+    setTestMsg([...(d.sent ? ['Test digest sent. Check your inbox.'] : []), ...d.errors.map((e: string) => `Failed: ${e}`)]);
   };
 
   if (!s) return <main className="settings">Loading…</main>;
@@ -54,7 +53,7 @@ export default function SettingsPage() {
         <button className="btn ghost" onClick={test}>Send test reminder</button>
       </div>
       {msg && <div>{msg}</div>}
-      {testMsg.map((m, i) => <div key={i} className={m.includes('failed') ? 'err' : 'muted'}>{m}</div>)}
+      {testMsg.map((m, i) => <div key={i} className={/fail/i.test(m) ? 'err' : 'muted'}>{m}</div>)}
       <p className="muted">Until you verify a domain in Resend, it can only deliver to the email address of your Resend account. Texts through a carrier address need a verified domain.</p>
     </main>
   );

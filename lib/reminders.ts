@@ -53,12 +53,73 @@ export async function sendEmail(to: string, subject: string, text: string): Prom
   if (!res.ok) throw new Error(`Resend ${res.status}: ${await res.text()}`);
 }
 
-/** Single place to swap in Twilio later. */
-export async function sendReminder(settings: Settings, task: Task, today: string): Promise<number> {
-  const text = reminderText(task, today);
+const BIG = new Set(['exam', 'test', 'quiz']);
+const SMS_MAX = 150;
+
+export interface Digest {
+  subject: string;
+  text: string;
+  sms: string;
+  count: number;
+}
+
+function dayWord(due: string | null, today: string): string {
+  if (!due) return '';
+  const d = daysBetween(today, due);
+  if (d <= 0) return 'today';
+  if (d === 1) return 'tmrw';
+  const [y, m, day] = due.split('-').map(Number);
+  return new Date(y, m - 1, day).toLocaleDateString('en-US', { weekday: 'short' });
+}
+
+/** One message covering every task that has a reminder due. Null when there is nothing to say. */
+export function buildDigest(tasks: Task[], today: string): Digest | null {
+  if (!tasks.length) return null;
+  const days = (t: Task) => (t.due ? daysBetween(today, t.due) : 99);
+  const sorted = [...tasks].sort((a, b) => days(a) - days(b) || Number(BIG.has(b.type)) - Number(BIG.has(a.type)) || a.title.localeCompare(b.title));
+
+  const groups: [string, Task[]][] = [
+    ['Due today', sorted.filter((t) => days(t) <= 0)],
+    ['Due tomorrow', sorted.filter((t) => days(t) === 1)],
+    ['Coming up', sorted.filter((t) => days(t) > 1)],
+  ];
+  const text = groups
+    .filter(([, list]) => list.length)
+    .map(([name, list]) => `${name}\n${list.map((t) => `- ${t.type.toUpperCase()}: ${t.title}${days(t) > 1 ? ` (${dayWord(t.due, today)})` : ''}`).join('\n')}`)
+    .join('\n\n');
+
+  // Texts are short: add items until the next one would overflow, then say how many are left.
+  const parts = sorted.map((t) => `${t.title} (${dayWord(t.due, today)})`);
+  let sms = 'Due: ';
+  let used = 0;
+  for (const part of parts) {
+    const next = sms + (used ? ', ' : '') + part;
+    const rest = parts.length - used - 1;
+    if (next.length + (rest ? ` +${rest} more`.length : 0) > SMS_MAX && used > 0) break;
+    sms = next;
+    used++;
+  }
+  if (used < parts.length) sms += ` +${parts.length - used} more`;
+
+  const n = tasks.length;
+  return { subject: `${n} thing${n === 1 ? '' : 's'} due soon`, text, sms, count: n };
+}
+
+/** Sends the digest to every configured destination. Swap in Twilio for texts here later. */
+export async function sendDigest(settings: Settings, digest: Digest): Promise<{ sent: number; errors: string[] }> {
   let sent = 0;
+  const errors: string[] = [];
   const sms = settings.textReminders ? smsAddress(settings) : null;
-  if (sms) { await sendEmail(sms, 'Reminder', text); sent++; }
-  if (settings.emailReminders && settings.email) { await sendEmail(settings.email, `Reminder: ${task.title}`, text); sent++; }
-  return sent;
+  const targets: [string, string, string][] = [];
+  if (sms) targets.push(['text', sms, digest.sms]);
+  if (settings.emailReminders && settings.email.trim()) targets.push(['email', settings.email.trim(), digest.text]);
+  for (const [kind, to, body] of targets) {
+    try {
+      await sendEmail(to, kind === 'text' ? 'Due soon' : digest.subject, body);
+      sent++;
+    } catch (e) {
+      errors.push(`${kind}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return { sent, errors };
 }
