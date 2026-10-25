@@ -77,3 +77,33 @@ describe('reminders', () => {
     expect(daysBetween(today, '2026-10-26')).toBe(1);
   });
 });
+
+import { dotsByDay, greeting, stats, weekDays } from '../lib/week';
+import { matchesDate } from '../lib/filters';
+
+describe('week', () => {
+  it('lists seven days from today, crossing a month end', () => {
+    const days = weekDays('2026-10-29');
+    expect(days.map((d) => d.date)).toEqual(['2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02', '2026-11-03', '2026-11-04']);
+    expect(days[0]).toMatchObject({ label: 'Thu', isToday: true });
+  });
+  it('puts one dot per open task on its day, colored by priority', () => {
+    const days = weekDays(today);
+    const dots = dotsByDay(
+      [T({ type: 'exam', due: '2026-10-26' }), T({ due: '2026-10-26', done: true }), T({ due: '2026-11-30' })],
+      days, today,
+    );
+    expect(dots['2026-10-26']).toEqual(['high']);
+    expect(dots['2026-10-27']).toEqual([]);
+  });
+  it('counts due today and overdue, ignoring done tasks', () => {
+    const s = stats([T({ due: today }), T({ due: '2026-10-20' }), T({ due: '2026-10-20', done: true }), T({ done: true })], today);
+    expect(s).toEqual({ dueToday: 1, overdue: 1, doneRecently: 2 });
+  });
+  it('greets by hour and filters by date', () => {
+    expect(greeting(8)).toBe('Good morning');
+    expect(greeting(19)).toBe('Good evening');
+    expect(matchesDate(T({ due: today }), today)).toBe(true);
+    expect(matchesDate(T({ due: today, done: true }), today)).toBe(false);
+  });
+});

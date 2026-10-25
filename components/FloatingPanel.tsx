@@ -29,7 +29,8 @@ export default function FloatingPanel({ title, badge, children }: Props) {
   useEffect(() => {
     let saved: { x: number; y: number; min: boolean } | null = null;
     try { saved = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch {}
-    setMin(!!saved?.min);
+    // First visit on a phone: start minimized so the page behind it is visible.
+    setMin(saved ? !!saved.min : window.innerWidth < 700);
     setPos(clamp(saved?.x ?? window.innerWidth - 376, saved?.y ?? 16));
     const onResize = () => setPos((p) => (p ? clamp(p.x, p.y) : p));
     window.addEventListener('resize', onResize);

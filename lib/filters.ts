@@ -39,3 +39,8 @@ export function matchesSearch(t: Task, q: string): boolean {
   const s = q.trim().toLowerCase();
   return !s || t.title.toLowerCase().includes(s) || t.details.toLowerCase().includes(s) || t.type.includes(s);
 }
+
+/** Open tasks due on one specific day (used by the week strip). */
+export function matchesDate(t: Task, date: string): boolean {
+  return !t.done && t.due === date;
+}

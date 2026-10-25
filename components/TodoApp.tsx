@@ -1,11 +1,12 @@
 'use client';
-import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { daysBetween, toISODate } from '@/lib/dates';
-import { FILTERS, matchesFilter, matchesSearch, type FilterId } from '@/lib/filters';
+import { FILTERS, matchesDate, matchesFilter, matchesSearch, type FilterId } from '@/lib/filters';
 import { priorityOf, scoreTask } from '@/lib/priority';
 import type { Task } from '@/lib/types';
 import FloatingPanel from './FloatingPanel';
+import Home from './Home';
+import ReminderSetup from './ReminderSetup';
 
 function dueLabel(due: string | null, today: string): string {
   if (!due) return 'no date';
@@ -21,6 +22,7 @@ export default function TodoApp() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [today, setToday] = useState(() => toISODate(new Date()));
   const [filter, setFilter] = useState<FilterId>('active');
+  const [day, setDay] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<'priority' | 'due'>('priority');
   const [text, setText] = useState('');
@@ -78,22 +80,18 @@ export default function TodoApp() {
   };
 
   const visible = useMemo(() => {
-    const list = tasks.filter((t) => matchesFilter(t, filter, today) && matchesSearch(t, query));
+    const list = tasks.filter((t) => (day ? matchesDate(t, day) : matchesFilter(t, filter, today)) && matchesSearch(t, query));
     return list.sort((a, b) => {
       if (sort === 'due') return (a.due ?? '9999').localeCompare(b.due ?? '9999');
       return scoreTask(b, today) - scoreTask(a, today) || (a.due ?? '9999').localeCompare(b.due ?? '9999');
     });
-  }, [tasks, filter, query, sort, today]);
+  }, [tasks, filter, day, query, sort, today]);
 
   const dueSoon = tasks.filter((t) => !t.done && t.due && daysBetween(today, t.due) <= 1).length;
 
   return (
     <>
-      <main className="home">
-        <h1>Smart Assignment To-Do</h1>
-        <p>Your to-do panel floats on this page. Drag it by the header, minimize it with – (or double-click the header). Install this site as an app to keep it handy.</p>
-        <p><Link href="/settings">Reminder settings</Link></p>
-      </main>
+      <Home tasks={tasks} today={today} selectedDay={day} onPickDay={setDay} />
       <FloatingPanel title="To-Do" badge={dueSoon}>
         {needLogin ? (
           <div className="add">
@@ -121,6 +119,11 @@ export default function TodoApp() {
               </select>
             </div>
             <input type="search" placeholder="Search tasks…" value={query} onChange={(e) => setQuery(e.target.value)} />
+            {day && (
+              <button className="chip" onClick={() => setDay(null)}>
+                Showing {new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })} ×
+              </button>
+            )}
             {filter === 'completed' && tasks.some((t) => t.done) && (
               <button className="btn ghost" onClick={clearCompleted}>Clear completed</button>
             )}
@@ -142,6 +145,7 @@ export default function TodoApp() {
                 </div>
               );
             })}
+            <ReminderSetup onNeedLogin={() => setNeedLogin(true)} />
           </>
         )}
       </FloatingPanel>

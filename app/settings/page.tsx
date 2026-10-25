@@ -12,6 +12,7 @@ export default function SettingsPage() {
   const [s, setS] = useState<Settings | null>(null);
   const [carriers, setCarriers] = useState<string[]>([]);
   const [msg, setMsg] = useState('');
+  const [testMsg, setTestMsg] = useState<string[]>([]);
 
   useEffect(() => {
     fetch('/api/settings').then((r) => r.json()).then((d) => { setS(d.settings); setCarriers(d.carriers); });
@@ -21,6 +22,15 @@ export default function SettingsPage() {
     const res = await fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(s) });
     const d = await res.json();
     setMsg(res.ok ? (d.smsAddress ? `Saved. Texts go to ${d.smsAddress}` : 'Saved. Add a 10-digit phone and carrier to enable texts.') : 'Save failed');
+  };
+
+  const test = async () => {
+    setTestMsg(['Sending…']);
+    const res = await fetch('/api/settings/test', { method: 'POST' });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return setTestMsg([d.error || 'Test failed.']);
+    setTestMsg(d.results.map((r: { kind: string; ok: boolean; error?: string }) =>
+      r.ok ? `Sent to your ${r.kind}. Check it now.` : `${r.kind === 'text' ? 'Text' : 'Email'} failed: ${r.error}`));
   };
 
   if (!s) return <main className="settings">Loading…</main>;
@@ -39,8 +49,13 @@ export default function SettingsPage() {
       <label className="check"><input type="checkbox" checked={s.textReminders} onChange={(e) => set({ textReminders: e.target.checked })} /> Text me (via carrier email-to-SMS gateway)</label>
       <label>Email<input type="email" value={s.email} onChange={(e) => set({ email: e.target.value })} /></label>
       <label className="check"><input type="checkbox" checked={s.emailReminders} onChange={(e) => set({ emailReminders: e.target.checked })} /> Also email me</label>
-      <button className="btn" onClick={save}>Save</button>
+      <div className="row">
+        <button className="btn" onClick={save}>Save</button>
+        <button className="btn ghost" onClick={test}>Send test reminder</button>
+      </div>
       {msg && <div>{msg}</div>}
+      {testMsg.map((m, i) => <div key={i} className={m.includes('failed') ? 'err' : 'muted'}>{m}</div>)}
+      <p className="muted">Until you verify a domain in Resend, it can only deliver to the email address of your Resend account. Texts through a carrier address need a verified domain.</p>
     </main>
   );
 }
