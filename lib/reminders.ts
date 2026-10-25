@@ -21,7 +21,7 @@ export function smsAddress(s: Pick<Settings, 'phone' | 'carrier'>): string | nul
 
 /** Lead times (days before due) at which a reminder fires. Exams/tests/quizzes get an early heads-up. */
 export function windowsFor(task: Task): number[] {
-  const big = task.type === 'exam' || task.type === 'test' || task.type === 'quiz';
+  const big = task.type === 'exam' || task.type === 'test' || task.type === 'quiz' || task.type === 'bill';
   return big ? [3, 1, 0] : [1, 0];
 }
 

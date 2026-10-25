@@ -1,6 +1,6 @@
 import { daysBetween } from './dates';
 import { priorityOf } from './priority';
-import type { Task } from './types';
+import { isSchoolType, type Task } from './types';
 
 export const FILTERS = [
   { id: 'active', label: 'All active' },
@@ -9,6 +9,8 @@ export const FILTERS = [
   { id: 'week', label: 'Due this week' },
   { id: 'overdue', label: 'Overdue' },
   { id: 'high', label: 'High priority' },
+  { id: 'school', label: 'School' },
+  { id: 'personal', label: 'Personal / life' },
   { id: 'assignments', label: 'Assignments' },
   { id: 'exams', label: 'Exams / tests / quizzes' },
   { id: 'study', label: 'Study & reading' },
@@ -28,6 +30,8 @@ export function matchesFilter(t: Task, filter: FilterId, today: string): boolean
     case 'week': return days !== null && days >= 0 && days <= 7;
     case 'overdue': return days !== null && days < 0;
     case 'high': return priorityOf(t, today) === 'high';
+    case 'school': return isSchoolType(t.type);
+    case 'personal': return !isSchoolType(t.type);
     case 'assignments': return t.type === 'assignment' || t.type === 'project';
     case 'exams': return t.type === 'exam' || t.type === 'test' || t.type === 'quiz';
     case 'study': return t.type === 'study' || t.type === 'reading';

@@ -1,6 +1,6 @@
 import * as chrono from 'chrono-node';
 import { toISODate } from './dates';
-import { TASK_TYPES, type TaskType } from './types';
+import { TASK_TYPES, isSchoolType, type TaskType } from './types';
 
 const TYPE_KEYWORDS: [TaskType, RegExp][] = [
   ['exam', /\b(exams?|finals?|midterms?)\b/i],
@@ -9,6 +9,12 @@ const TYPE_KEYWORDS: [TaskType, RegExp][] = [
   ['project', /\b(projects?|presentation|lab report|paper|essay)\b/i],
   ['study', /\b(study|review|revise|prepare|practice)\b/i],
   ['reading', /\b(read|reading|chapter)s?\b/i],
+  // Life tasks come before the generic "due" rule below, so "pay rent due friday" is a bill, not an assignment.
+  ['appointment', /\b(doctor|dentist|appointments?|meeting|interview|haircut|checkup|therapy)\b/i],
+  ['bill', /\b(bills?|rent|pay|payment|invoice|subscription|tuition)\b/i],
+  ['event', /\b(party|birthday|game|concert|trip|flight|wedding|graduation)\b/i],
+  ['errand', /\b(buy|pick up|groceries|grocery|return|mail|drop off|call|renew)\b/i],
+  ['personal', /\b(gym|workout|clean|laundry|cook|meal prep)\b/i],
   ['assignment', /\b(assignments?|homework|hw|worksheet|problem set|pset|due)\b/i],
 ];
 
@@ -67,7 +73,8 @@ export interface Summary {
 
 /** Rule-based fallback used when no Grok key is configured or the call fails. */
 export function summarizeLocal(text: string, now: Date = new Date()): Summary {
-  return { title: shortTitle(text), type: detectType(text), course: detectCourse(text), due: detectDate(text, now) };
+  const type = detectType(text);
+  return { title: shortTitle(text), type, course: isSchoolType(type) ? detectCourse(text) : null, due: detectDate(text, now) };
 }
 
 export function isTaskType(v: unknown): v is TaskType {

@@ -187,3 +187,95 @@ describe('progress', () => {
     expect(g.length).toBe(5);
   });
 });
+
+import { isGraded, isSchoolType } from '../lib/types';
+import { addScore, currentGrade, letter, neededScore, parseWeights, summary, weightWarning, type Part } from '../lib/grades';
+import { windowsFor } from '../lib/reminders';
+
+describe('life tasks', () => {
+  it('detects non-school types without stealing school ones', () => {
+    expect(detectType('Dentist appointment Tuesday 3pm')).toBe('appointment');
+    expect(detectType('Pay rent due friday')).toBe('bill');
+    expect(detectType('Buy groceries tomorrow')).toBe('errand');
+    expect(detectType("Sam's birthday party saturday")).toBe('event');
+    expect(detectType('Bio exam Friday')).toBe('exam');
+    expect(detectType('history paper due monday')).toBe('project');
+    expect(detectType('math homework due friday')).toBe('assignment');
+  });
+  it('gives no class tag to life tasks', () => {
+    const s = summarizeLocal('Dentist appointment art class friday', new Date('2026-10-25T12:00:00'));
+    expect(s.type).toBe('appointment');
+    expect(s.course).toBeNull();
+    expect(summarizeLocal('Bio exam friday', new Date('2026-10-25T12:00:00')).course).toBe('Bio');
+  });
+  it('ranks a bill due tomorrow above an errand due tomorrow, and splits school from life', () => {
+    expect(scoreTask({ type: 'bill', due: '2026-10-26' }, today)).toBeGreaterThan(scoreTask({ type: 'errand', due: '2026-10-26' }, today));
+    expect(priorityOf({ type: 'appointment', due: '2026-10-26' }, today)).toBe('high');
+    expect(matchesFilter(T({ type: 'bill' }), 'personal', today)).toBe(true);
+    expect(matchesFilter(T({ type: 'exam' }), 'personal', today)).toBe(false);
+    expect(matchesFilter(T({ type: 'exam' }), 'school', today)).toBe(true);
+    expect(isSchoolType('errand')).toBe(false);
+  });
+  it('gives bills an early heads-up like exams', () => {
+    expect(windowsFor(T({ type: 'bill' }))).toEqual([3, 1, 0]);
+    expect(windowsFor(T({ type: 'appointment' }))).toEqual([1, 0]);
+  });
+  it('defaults graded by type and lets the user override', () => {
+    expect(isGraded({ type: 'exam' })).toBe(true);
+    expect(isGraded({ type: 'assignment' })).toBe(false);
+    expect(isGraded({ type: 'assignment', graded: true })).toBe(true);
+    expect(isGraded({ type: 'exam', graded: false })).toBe(false);
+    expect(isGraded({ type: 'errand' })).toBe(false);
+  });
+});
+
+const P = (name: string, weight: number | null, ...scores: number[]): Part => ({ id: name, name, weight, scores });
+
+describe('grades', () => {
+  it('averages scores within a part and weights across graded parts only', () => {
+    expect(currentGrade([P('HW', 20, 90, 100), P('Final', 40)])).toBe(95);
+    expect(currentGrade([P('HW', 20, 80), P('Midterm', 30, 90)])).toBeCloseTo(86, 5);
+    expect(currentGrade([P('Final', 40)])).toBeNull();
+    expect(currentGrade([P('HW', null, 90)])).toBeNull();
+  });
+  it('computes the score needed on what is left', () => {
+    const parts = [P('HW', 30, 90), P('Midterm', 30, 80), P('Final', 40)];
+    // earned 27+24=51 of 100; to reach 85 the final must give 34 points of 40 => 85
+    expect(neededScore(parts, 85)).toMatchObject({ status: 'needed', score: 85, remaining: 40, approximate: false });
+    expect(neededScore(parts, 40)).toEqual({ status: 'secured' });
+    expect(neededScore(parts, 99)).toMatchObject({ status: 'unreachable' });
+    expect(neededScore([P('HW', 100, 90)], 90)).toEqual({ status: 'none' });
+    expect(neededScore([P('HW', 40, 90), P('Final', 40)], 85)).toMatchObject({ approximate: true });
+  });
+  it('maps letters and warns when weights do not add up', () => {
+    expect(letter(93)).toBe('A');
+    expect(letter(89.9)).toBe('B+');
+    expect(letter(42)).toBe('F');
+    expect(weightWarning([P('a', 40), P('b', 50)])).toMatch(/90%/);
+    expect(weightWarning([P('a', 60), P('b', 50)])).toMatch(/more than 100/);
+    expect(weightWarning([P('a', 60), P('b', 40)])).toBeNull();
+  });
+  it('parses syllabus lines', () => {
+    const got = parseWeights(`Grading
+- Homework: 20%
+Quizzes (best 4 of 5) - 15 percent
+• Midterm Exam 25%
+40% Final Exam
+Attendance and good vibes`);
+    expect(got).toEqual([
+      { name: 'Homework', weight: 20 },
+      { name: 'Quizzes (best 4 of 5)', weight: 15 },
+      { name: 'Midterm Exam', weight: 25 },
+      { name: 'Final Exam', weight: 40 },
+    ]);
+  });
+  it('logs a score onto a part without touching others', () => {
+    const book = { classes: [{ id: 'c', name: 'Bio', target: 90, parts: [P('Quizzes', 20, 80), P('Final', 40)] }] };
+    const next = addScore(book, 'c', 'Quizzes', 100);
+    expect(next.classes[0].parts[0].scores).toEqual([80, 100]);
+    expect(next.classes[0].parts[1].scores).toEqual([]);
+    expect(book.classes[0].parts[0].scores).toEqual([80]);
+    expect(addScore(book, 'c', 'Quizzes', 140).classes[0].parts[0].scores).toEqual([80, 100]);
+    expect(summary(next.classes[0])).toBe('Bio 90% (A-)');
+  });
+});

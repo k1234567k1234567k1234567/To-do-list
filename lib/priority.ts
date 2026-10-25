@@ -10,7 +10,12 @@ const TYPE_WEIGHT: Record<TaskType, number> = {
   project: 25,
   assignment: 15,
   study: 12,
+  appointment: 30,
+  bill: 25,
+  event: 20,
+  errand: 12,
   other: 10,
+  personal: 10,
   reading: 8,
 };
 

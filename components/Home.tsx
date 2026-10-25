@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { greeting, stats, type History } from '@/lib/week';
 import type { Task } from '@/lib/types';
 import FocusTimer from './FocusTimer';
+import Grades from './Grades';
 import Notes from './Notes';
 import Progress from './Progress';
 import Schedule from './Schedule';
@@ -48,6 +49,7 @@ export default function Home({ tasks, today, history, selectedDay, onPickDay }: 
         <FocusTimer />
       </div>
       <Notes />
+      <Grades />
 
       <footer className="foot"><Link href="/settings">Reminder settings</Link></footer>
     </main>

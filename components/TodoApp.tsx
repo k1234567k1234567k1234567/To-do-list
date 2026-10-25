@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { daysBetween, toISODate } from '@/lib/dates';
 import { FILTERS, courseSlot, matchesCourse, matchesDate, matchesFilter, matchesSearch, type FilterId } from '@/lib/filters';
 import { priorityOf, scoreTask } from '@/lib/priority';
-import { TASK_TYPES, type Task, type TaskType } from '@/lib/types';
+import { TASK_TYPES, isGraded, isSchoolType, type Task, type TaskType } from '@/lib/types';
 import type { History } from '@/lib/week';
 import FloatingPanel from './FloatingPanel';
 import Home from './Home';
@@ -23,7 +23,7 @@ function dueLabel(due: string | null, today: string): string {
   return `due ${due}`;
 }
 
-interface Draft { title: string; due: string; type: TaskType; course: string }
+interface Draft { title: string; due: string; type: TaskType; course: string; graded: boolean }
 interface Pending { tasks: Task[]; clear: boolean; timer: ReturnType<typeof setTimeout> }
 
 export default function TodoApp() {
@@ -115,17 +115,22 @@ export default function TodoApp() {
     await fetch(`/api/tasks/${t.id}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ done: !t.done }) });
     const h = await fetch('/api/history');
     if (h.ok) setHistory(await h.json());
+    window.dispatchEvent(new Event('todo:changed')); // the Grades card refreshes its waiting list
   };
 
   const startEdit = (t: Task) =>
-    setEditing({ id: t.id, draft: { title: t.title, due: t.due ?? '', type: t.type, course: t.course ?? '' } });
+    setEditing({ id: t.id, draft: { title: t.title, due: t.due ?? '', type: t.type, course: t.course ?? '', graded: isGraded(t) } });
   const saveEdit = async () => {
     if (!editing) return;
     const { id, draft } = editing;
     if (!draft.title.trim()) return;
     const res = await fetch(`/api/tasks/${id}`, {
       method: 'PATCH', headers: JSON_HEADERS,
-      body: JSON.stringify({ title: draft.title, due: draft.due || null, type: draft.type, course: draft.course || null }),
+      body: JSON.stringify({
+        title: draft.title, due: draft.due || null, type: draft.type,
+        course: isSchoolType(draft.type) ? draft.course || null : null,
+        graded: isSchoolType(draft.type) ? draft.graded : false,
+      }),
     });
     if (res.ok) {
       const updated: Task = await res.json();
@@ -167,7 +172,7 @@ export default function TodoApp() {
         ) : (
           <>
             <div className="add">
-              <textarea placeholder="Describe an assignment in as much detail as you like… e.g. “Bio exam on chapters 4-6 this Friday, bring a calculator”"
+              <textarea placeholder="Describe a task in as much detail as you like… e.g. “Bio exam on chapters 4-6 this Friday” or “Dentist Tuesday 3pm”"
                 value={text} onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) add(); }} />
               <button className="btn" onClick={add} disabled={busy || !text.trim()}>{busy ? 'Summarizing…' : 'Add'}</button>
@@ -213,7 +218,12 @@ export default function TodoApp() {
                           {TASK_TYPES.map((x) => <option key={x} value={x}>{x}</option>)}
                         </select>
                       </div>
-                      <input value={d.course} onChange={(e) => set({ course: e.target.value })} list="course-list" placeholder="Class (optional)" aria-label="Class" maxLength={30} />
+                      {isSchoolType(d.type) && (
+                        <>
+                          <input value={d.course} onChange={(e) => set({ course: e.target.value })} list="course-list" placeholder="Class (optional)" aria-label="Class" maxLength={30} />
+                          <label className="check"><input type="checkbox" checked={d.graded} onChange={(e) => set({ graded: e.target.checked })} /> This will be graded</label>
+                        </>
+                      )}
                       <div className="row">
                         <button className="btn" onClick={saveEdit} disabled={!d.title.trim()}>Save</button>
                         <button className="btn ghost" onClick={() => setEditing(null)}>Cancel</button>
