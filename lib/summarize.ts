@@ -2,19 +2,22 @@ import { isTaskType, summarizeLocal, type Summary } from './parse';
 import { toISODate } from './dates';
 import { TASK_TYPES } from './types';
 
-const XAI_URL = 'https://api.x.ai/v1/chat/completions';
-const MODEL = process.env.XAI_MODEL || 'grok-3-mini';
+// Groq (OpenAI-compatible, free tier). Set XAI_API_KEY instead to use xAI Grok.
+const PROVIDER = process.env.GROQ_API_KEY
+  ? { url: 'https://api.groq.com/openai/v1/chat/completions', key: process.env.GROQ_API_KEY, model: process.env.LLM_MODEL || 'llama-3.3-70b-versatile' }
+  : process.env.XAI_API_KEY
+    ? { url: 'https://api.x.ai/v1/chat/completions', key: process.env.XAI_API_KEY, model: process.env.LLM_MODEL || 'grok-3-mini' }
+    : null;
 
-/** Summarize free-form assignment text with Grok; falls back to local rules on any failure. */
+/** Summarize free-form assignment text with an LLM; falls back to local rules on any failure. */
 export async function summarize(text: string, now: Date = new Date()): Promise<Summary> {
-  const key = process.env.XAI_API_KEY;
-  if (!key) return summarizeLocal(text, now);
+  if (!PROVIDER) return summarizeLocal(text, now);
   try {
-    const res = await fetch(XAI_URL, {
+    const res = await fetch(PROVIDER.url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${PROVIDER.key}` },
       body: JSON.stringify({
-        model: MODEL,
+        model: PROVIDER.model,
         temperature: 0,
         response_format: { type: 'json_object' },
         messages: [
@@ -30,7 +33,7 @@ export async function summarize(text: string, now: Date = new Date()): Promise<S
       }),
       signal: AbortSignal.timeout(15000),
     });
-    if (!res.ok) throw new Error(`xAI ${res.status}`);
+    if (!res.ok) throw new Error(`LLM ${res.status}`);
     const data = await res.json();
     const parsed = JSON.parse(data.choices[0].message.content);
     const local = summarizeLocal(text, now);
@@ -40,7 +43,7 @@ export async function summarize(text: string, now: Date = new Date()): Promise<S
       due: /^\d{4}-\d{2}-\d{2}$/.test(parsed.due ?? '') ? parsed.due : local.due,
     };
   } catch (err) {
-    console.error('Grok summarize failed, using fallback:', err);
+    console.error('LLM summarize failed, using fallback:', err);
     return summarizeLocal(text, now);
   }
 }
