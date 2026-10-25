@@ -6,6 +6,8 @@ export interface Task {
   title: string;
   details: string;
   type: TaskType;
+  course?: string | null; // class label, e.g. "Bio"
+  completedAt?: string | null;
   due: string | null; // YYYY-MM-DD
   done: boolean;
   createdAt: string;

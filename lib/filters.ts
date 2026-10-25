@@ -44,3 +44,14 @@ export function matchesSearch(t: Task, q: string): boolean {
 export function matchesDate(t: Task, date: string): boolean {
   return !t.done && t.due === date;
 }
+
+export function matchesCourse(t: Task, course: string): boolean {
+  return !course || (t.course ?? '') === course;
+}
+
+/** Stable color slot 0-5 for a class name, so "Bio" is always the same color. */
+export function courseSlot(name: string): number {
+  let h = 0;
+  for (const ch of name.toLowerCase()) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h % 6;
+}

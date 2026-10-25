@@ -1,4 +1,4 @@
-import { isTaskType, summarizeLocal, type Summary } from './parse';
+import { cleanCourse, isTaskType, summarizeLocal, type Summary } from './parse';
 import { toISODate } from './dates';
 import { TASK_TYPES } from './types';
 
@@ -42,7 +42,7 @@ export async function summarize(text: string, now: Date = new Date()): Promise<S
             role: 'system',
             content:
               `Turn a student's assignment description into JSON: {"title": string (max 80 chars, imperative, include course/subject), ` +
-              `"type": one of ${TASK_TYPES.join('|')}, "due": "YYYY-MM-DD" or null}. ` +
+              `"type": one of ${TASK_TYPES.join('|')}, "course": short class name like Bio, Math or English, or null, "due": "YYYY-MM-DD" or null}. ` +
               `Today is ${now.toLocaleDateString('en-US', { weekday: 'long' })} ${toISODate(now)}. Resolve relative dates like "friday" to the next such date. Output JSON only.`,
           },
           { role: 'user', content: text.slice(0, 6000) },
@@ -57,6 +57,7 @@ export async function summarize(text: string, now: Date = new Date()): Promise<S
     return {
       title: typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.trim().slice(0, 100) : local.title,
       type: isTaskType(parsed.type) ? parsed.type : local.type,
+      course: cleanCourse(parsed.course) ?? local.course,
       // Models are unreliable at weekday math, so a date the parser found in the text wins.
       due: local.due ?? (/^\d{4}-\d{2}-\d{2}$/.test(parsed.due ?? '') ? parsed.due : null),
     };

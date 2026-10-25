@@ -16,6 +16,9 @@ export interface Store {
   clearCompleted(): Promise<number>;
   getSettings(): Promise<Settings>;
   saveSettings(s: Settings): Promise<void>;
+  /** Small named values (notes, completion history). */
+  getKV<T>(key: string, fallback: T): Promise<T>;
+  setKV(key: string, value: unknown): Promise<void>;
 }
 
 function newTask(t: Omit<Task, 'id' | 'createdAt' | 'done' | 'remindersSent'>): Task {
@@ -24,7 +27,7 @@ function newTask(t: Omit<Task, 'id' | 'createdAt' | 'done' | 'remindersSent'>): 
 
 function fileStore(): Store {
   const file = path.join(process.cwd(), '.data', 'db.json');
-  type Data = { tasks: Task[]; settings: Settings };
+  type Data = { tasks: Task[]; settings: Settings; kv?: Record<string, unknown> };
   const read = async (): Promise<Data> => {
     try {
       return JSON.parse(await fs.readFile(file, 'utf8'));
@@ -54,6 +57,8 @@ function fileStore(): Store {
     },
     async getSettings() { return { ...DEFAULT_SETTINGS, ...(await read()).settings }; },
     async saveSettings(s) { const d = await read(); d.settings = s; await write(d); },
+    async getKV<T>(key: string, fallback: T) { const v = (await read()).kv?.[key]; return (v === undefined ? fallback : v) as T; },
+    async setKV(key, value) { const d = await read(); d.kv = { ...d.kv, [key]: value }; await write(d); },
   };
 }
 
@@ -64,6 +69,7 @@ function pgStore(url: string): Store {
     (ready ??= Promise.all([
       sql`CREATE TABLE IF NOT EXISTS tasks (id text PRIMARY KEY, data jsonb NOT NULL)`,
       sql`CREATE TABLE IF NOT EXISTS settings (id int PRIMARY KEY, data jsonb NOT NULL)`,
+      sql`CREATE TABLE IF NOT EXISTS kv (k text PRIMARY KEY, v jsonb NOT NULL)`,
     ]));
   return {
     async list() {
@@ -99,6 +105,16 @@ function pgStore(url: string): Store {
       await init();
       await sql`INSERT INTO settings (id, data) VALUES (1, ${JSON.stringify(s)}::jsonb)
                 ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data`;
+    },
+    async getKV<T>(key: string, fallback: T) {
+      await init();
+      const rows = await sql`SELECT v FROM kv WHERE k = ${key}`;
+      return (rows.length ? rows[0].v : fallback) as T;
+    },
+    async setKV(key, value) {
+      await init();
+      await sql`INSERT INTO kv (k, v) VALUES (${key}, ${JSON.stringify(value)}::jsonb)
+                ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v`;
     },
   };
 }

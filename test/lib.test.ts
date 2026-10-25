@@ -97,8 +97,9 @@ describe('week', () => {
     expect(dots['2026-10-27']).toEqual([]);
   });
   it('counts due today and overdue, ignoring done tasks', () => {
-    const s = stats([T({ due: today }), T({ due: '2026-10-20' }), T({ due: '2026-10-20', done: true }), T({ done: true })], today);
-    expect(s).toEqual({ dueToday: 1, overdue: 1, doneRecently: 2 });
+    const tasks = [T({ due: today }), T({ due: '2026-10-20' }), T({ due: '2026-10-20', done: true }), T({ done: true })];
+    expect(stats(tasks, today, { '2026-10-25': 2, '2026-10-21': 1, '2026-10-10': 9 })).toEqual({ dueToday: 1, overdue: 1, doneRecently: 3 });
+    expect(stats([], today).doneRecently).toBe(0);
   });
   it('greets by hour and filters by date', () => {
     expect(greeting(8)).toBe('Good morning');
@@ -131,5 +132,58 @@ describe('digest', () => {
     const d = buildDigest(many, today)!;
     expect(d.sms.length).toBeLessThanOrEqual(160);
     expect(d.sms).toMatch(/\+\d+ more$/);
+  });
+});
+
+import { cleanCourse, detectCourse } from '../lib/parse';
+import { matchesCourse } from '../lib/filters';
+import { lastSevenDays, monthGrid, streak } from '../lib/week';
+import { addDays } from '../lib/dates';
+
+describe('courses', () => {
+  it('detects classes from keywords', () => {
+    expect(detectCourse('Bio exam on chapters 4-6')).toBe('Bio');
+    expect(detectCourse('history essay on Rome')).toBe('History');
+    expect(detectCourse('English essay on Hamlet')).toBe('English');
+    expect(detectCourse('calc homework 4.2')).toBe('Math');
+    expect(detectCourse('dentist appointment')).toBeNull();
+  });
+  it('cleans model output', () => {
+    expect(cleanCourse('  Bio ')).toBe('Bio');
+    expect(cleanCourse('null')).toBeNull();
+    expect(cleanCourse(5)).toBeNull();
+    expect(cleanCourse('x'.repeat(50))).toHaveLength(30);
+  });
+  it('filters by course, empty means all', () => {
+    expect(matchesCourse(T({ course: 'Bio' }), 'Bio')).toBe(true);
+    expect(matchesCourse(T({ course: 'Bio' }), 'Math')).toBe(false);
+    expect(matchesCourse(T({}), '')).toBe(true);
+  });
+});
+
+describe('progress', () => {
+  it('counts a streak ending today or yesterday and stops at a gap', () => {
+    expect(streak({ '2026-10-25': 1, '2026-10-24': 2, '2026-10-23': 1 }, today)).toBe(3);
+    expect(streak({ '2026-10-24': 1, '2026-10-23': 1 }, today)).toBe(2);
+    expect(streak({ '2026-10-25': 1, '2026-10-23': 1 }, today)).toBe(1);
+    expect(streak({ '2026-10-22': 5 }, today)).toBe(0);
+  });
+  it('streak crosses a month boundary', () => {
+    expect(streak({ '2026-11-01': 1, '2026-10-31': 1, '2026-10-30': 1 }, '2026-11-01')).toBe(3);
+  });
+  it('returns seven days oldest first with counts', () => {
+    const d = lastSevenDays({ '2026-10-25': 2, '2026-10-19': 1 }, today);
+    expect(d.map((x) => x.date)[0]).toBe('2026-10-19');
+    expect(d[6]).toMatchObject({ date: '2026-10-25', count: 2, label: 'Sun' });
+    expect(d[0].count).toBe(1);
+    expect(addDays('2026-10-31', 1)).toBe('2026-11-01');
+  });
+  it('builds a Sunday-first month grid', () => {
+    const g = monthGrid(2026, 9); // October 2026 starts on a Thursday
+    expect(g[0][0]).toMatchObject({ date: '2026-09-27', inMonth: false });
+    expect(g[0][4]).toMatchObject({ date: '2026-10-01', inMonth: true });
+    expect(g.every((w) => w.length === 7)).toBe(true);
+    expect(g.flat().filter((c) => c.inMonth)).toHaveLength(31);
+    expect(g.length).toBe(5);
   });
 });

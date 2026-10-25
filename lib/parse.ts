@@ -17,6 +17,34 @@ export function detectType(text: string): TaskType {
   return 'other';
 }
 
+const COURSES: [string, RegExp][] = [
+  ['Bio', /\b(bio|biology|anatomy)\b/i],
+  ['Chem', /\b(chem|chemistry)\b/i],
+  ['Physics', /\bphysics\b/i],
+  ['Math', /\b(math|algebra|calculus|calc|geometry|trig|trigonometry|statistics|stats)\b/i],
+  ['History', /\b(history|apush|civics)\b/i],
+  ['English', /\b(english|literature|lit|hamlet|novel|poetry|grammar)\b/i],
+  ['Spanish', /\bspanish\b/i],
+  ['French', /\bfrench\b/i],
+  ['CS', /\b(cs|computer science|programming|coding)\b/i],
+  ['Econ', /\becon(omics)?\b/i],
+  ['Psych', /\bpsych(ology)?\b/i],
+  ['Art', /\b(art|drawing|painting)\b/i],
+];
+
+/** Guess the class from keywords; null when nothing matches. */
+export function detectCourse(text: string): string | null {
+  for (const [name, re] of COURSES) if (re.test(text)) return name;
+  return null;
+}
+
+/** Clean a class label typed by a user or returned by a model. */
+export function cleanCourse(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const c = v.trim().replace(/\s+/g, ' ').slice(0, 30);
+  return !c || /^(null|none|n\/a|unknown)$/i.test(c) ? null : c;
+}
+
 export function detectDate(text: string, now: Date = new Date()): string | null {
   const results = chrono.parse(text, now, { forwardDate: true });
   if (!results.length) return null;
@@ -33,12 +61,13 @@ export function shortTitle(text: string, max = 80): string {
 export interface Summary {
   title: string;
   type: TaskType;
+  course: string | null;
   due: string | null;
 }
 
 /** Rule-based fallback used when no Grok key is configured or the call fails. */
 export function summarizeLocal(text: string, now: Date = new Date()): Summary {
-  return { title: shortTitle(text), type: detectType(text), due: detectDate(text, now) };
+  return { title: shortTitle(text), type: detectType(text), course: detectCourse(text), due: detectDate(text, now) };
 }
 
 export function isTaskType(v: unknown): v is TaskType {

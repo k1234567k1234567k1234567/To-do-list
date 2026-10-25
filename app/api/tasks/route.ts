@@ -15,6 +15,6 @@ export async function POST(req: Request) {
   // Resolve relative dates against the user's clock, not the server's.
   const now = /^\d{4}-\d{2}-\d{2}$/.test(clientDate ?? '') ? new Date(`${clientDate}T12:00:00`) : new Date();
   const s = await summarize(text, now);
-  const task = await getStore().create({ title: s.title, type: s.type, due: s.due, details: text.trim() });
+  const task = await getStore().create({ title: s.title, type: s.type, course: s.course, due: s.due, details: text.trim() });
   return NextResponse.json(task, { status: 201 });
 }

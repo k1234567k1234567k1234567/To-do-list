@@ -20,3 +20,9 @@ export function nowIn(tz: string, now: Date = new Date()): { today: string; hour
   const get = (t: string) => parts.find((p) => p.type === t)!.value;
   return { today: `${get('year')}-${get('month')}-${get('day')}`, hour: Number(get('hour')) };
 }
+
+/** YYYY-MM-DD plus `n` calendar days. */
+export function addDays(date: string, n: number): string {
+  const [y, m, d] = date.split('-').map(Number);
+  return toISODate(new Date(y, m - 1, d + n));
+}
