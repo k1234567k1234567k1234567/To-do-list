@@ -43,7 +43,7 @@ export async function summarize(text: string, now: Date = new Date()): Promise<S
             content:
               `Turn a student's assignment description into JSON: {"title": string (max 80 chars, imperative, include course/subject), ` +
               `"type": one of ${TASK_TYPES.join('|')}, "due": "YYYY-MM-DD" or null}. ` +
-              `Today is ${toISODate(now)}. Resolve relative dates like "friday" to the next such date. Output JSON only.`,
+              `Today is ${now.toLocaleDateString('en-US', { weekday: 'long' })} ${toISODate(now)}. Resolve relative dates like "friday" to the next such date. Output JSON only.`,
           },
           { role: 'user', content: text.slice(0, 6000) },
         ],
@@ -57,7 +57,8 @@ export async function summarize(text: string, now: Date = new Date()): Promise<S
     return {
       title: typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.trim().slice(0, 100) : local.title,
       type: isTaskType(parsed.type) ? parsed.type : local.type,
-      due: /^\d{4}-\d{2}-\d{2}$/.test(parsed.due ?? '') ? parsed.due : local.due,
+      // Models are unreliable at weekday math, so a date the parser found in the text wins.
+      due: local.due ?? (/^\d{4}-\d{2}-\d{2}$/.test(parsed.due ?? '') ? parsed.due : null),
     };
   } catch (err) {
     console.error('LLM summarize failed, using fallback:', err);
