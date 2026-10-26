@@ -45,6 +45,8 @@ export default function TodoApp() {
   const [editing, setEditing] = useState<{ id: string; draft: Draft } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const pending = useRef<Pending | null>(null);
+  // Check-offs update shared lists (history, waiting-for-grade) on the server, so they go one at a time.
+  const patchQueue = useRef<Promise<unknown>>(Promise.resolve());
 
   const load = useCallback(async () => {
     setToday(toISODate(new Date())); // priorities re-rank as the date rolls over
@@ -137,12 +139,14 @@ export default function TodoApp() {
     setBusy(false);
   };
 
-  const toggle = async (t: Task) => {
+  const toggle = (t: Task) => {
     setTasks((ts) => ts.map((x) => (x.id === t.id ? { ...x, done: !t.done } : x)));
-    await fetch(`/api/tasks/${t.id}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ done: !t.done }) });
-    const h = await fetch('/api/history');
-    if (h.ok) setHistory(await h.json());
-    window.dispatchEvent(new Event('todo:changed')); // the Grades card refreshes its waiting list
+    patchQueue.current = patchQueue.current.then(async () => {
+      await fetch(`/api/tasks/${t.id}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ done: !t.done }) });
+      const h = await fetch('/api/history');
+      if (h.ok) setHistory(await h.json());
+      window.dispatchEvent(new Event('todo:changed')); // the Grades card refreshes its waiting list
+    }).catch(() => {});
   };
 
   const startEdit = (t: Task) =>

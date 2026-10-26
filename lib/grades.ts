@@ -313,3 +313,114 @@ export function summary(c: GradeClass): string {
   const g = currentGrade(c.parts);
   return g === null ? `${c.name} –` : `${c.name} ${Math.round(g)}% (${letter(g)})`;
 }
+
+// ---------- matching a finished task to a class and category ----------
+
+export interface TaskLike { type: string; title: string; course: string | null }
+export interface Suggestion {
+  classId: string | null;
+  partId: string | null;
+  label: string | null; // which member of a merged group (e.g. "Quizzes"), when one fits
+  reason: string;
+}
+
+/** Words a task's type points to, so a "quiz" task looks for categories mentioning quizzes. */
+const TYPE_WORDS: Record<string, string[]> = {
+  exam: ['test', 'exam', 'midterm', 'final'],
+  test: ['test', 'exam', 'midterm'],
+  quiz: ['quiz'],
+  assignment: ['assignment', 'homework', 'task'],
+  project: ['project', 'culminating'],
+};
+/** Words in a title that name a category on their own. */
+const TITLE_VOCAB = new Set([
+  'test', 'exam', 'midterm', 'final', 'quiz', 'assignment', 'homework', 'task', 'project', 'culminating',
+  'lab', 'listening', 'speaking', 'reading', 'writing', 'oral', 'presentation', 'essay',
+]);
+
+/** Words that point at one particular category count more than generic ones like "task" or "test". */
+const SPECIFIC = new Set(['lab', 'listening', 'speaking', 'reading', 'writing', 'oral', 'presentation', 'essay', 'midterm', 'final', 'culminating']);
+
+const stem = (w: string): string => {
+  const x = w.toLowerCase().replace(/[^a-z]/g, '');
+  if (x === 'quizzes') return 'quiz';
+  if (x === 'examination' || x === 'examinations') return 'exam';
+  return x.length > 3 && x.endsWith('s') ? x.slice(0, -1) : x;
+};
+const tokens = (text: string): string[] => text.split(/[^A-Za-z]+/).filter(Boolean).map(stem);
+
+function scoreName(name: string, typeWords: Set<string>, titleWords: Set<string>): { score: number; word: string | null } {
+  let score = 0;
+  let word: string | null = null;
+  for (const t of new Set(tokens(name))) {
+    // A word from the title counts more than one implied by the type: "Midterm exam" prefers a Midterm category over Tests.
+    const s = (titleWords.has(t) ? (SPECIFIC.has(t) ? 4 : 2) : 0) + (typeWords.has(t) ? 1 : 0);
+    if (s > score) { score = s; word = t; }
+    else if (s > 0) score += s;
+  }
+  return { score, word };
+}
+
+/** Best category in one class for a finished task, or none when unclear (never guesses between equals). */
+export function suggestPart(item: TaskLike, cls: GradeClass): { partId: string; label: string | null; reason: string } | null {
+  const typeWords = new Set((TYPE_WORDS[item.type] ?? []).map(stem));
+  const titleWords = new Set(tokens(item.title).filter((w) => TITLE_VOCAB.has(w)));
+  const rated = cls.parts
+    .filter((p) => p.kind !== 'attendance')
+    .map((p) => {
+      const own = scoreName(p.name, typeWords, titleWords);
+      const members = (p.members ?? []).map((m) => ({ m, ...scoreName(m, typeWords, titleWords) }));
+      const bestM = [...members].sort((a, b) => b.score - a.score)[0];
+      const tied = members.filter((x) => bestM && x.score === bestM.score).length > 1;
+      const score = Math.max(own.score, bestM?.score ?? 0);
+      const label = bestM && bestM.score > 0 && !tied ? bestM.m : null;
+      return { p, score, label, word: (bestM && bestM.score >= own.score ? bestM.word : own.word) };
+    })
+    .filter((r) => r.score > 0)
+    .sort((a, b) => b.score - a.score);
+  if (!rated.length || (rated[1] && rated[1].score === rated[0].score)) return null;
+  const top = rated[0];
+  const reason = top.word && titleWords.has(top.word) ? `the title mentions "${top.word}"` : `it is a ${item.type}`;
+  return { partId: top.p.id, label: top.label, reason };
+}
+
+/** Class for a finished task: its class tag, a class named in the title, or the only class. */
+export function suggestClass(item: TaskLike, classes: GradeClass[]): GradeClass | null {
+  const byTag = item.course ? classes.find((c) => c.name.toLowerCase() === item.course!.toLowerCase()) : undefined;
+  if (byTag) return byTag;
+  const words = new Set(item.title.toLowerCase().split(/[^a-z0-9]+/));
+  const byTitle = classes.filter((c) => c.name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).every((w) => words.has(w)));
+  if (byTitle.length === 1) return byTitle[0];
+  return classes.length === 1 ? classes[0] : null;
+}
+
+export function suggestTarget(item: TaskLike, classes: GradeClass[]): Suggestion | null {
+  const cls = suggestClass(item, classes);
+  if (!cls) return null;
+  const part = suggestPart(item, cls);
+  return { classId: cls.id, partId: part?.partId ?? null, label: part?.label ?? null, reason: part?.reason ?? '' };
+}
+
+// ---------- combining rows in the setup form ----------
+
+export interface DraftRow { id: string; name: string; weight: string; count: string; members?: string[] }
+
+/** Setup-form version of `mergeParts`: "Tests" + "Quizzes" = "Tests & quizzes", totals added when both are set. */
+export function mergeDraftRows(a: DraftRow, b: DraftRow): DraftRow | null {
+  if (isAttendanceName(a.name) || isAttendanceName(b.name)) return null;
+  const num = (v: string) => (v.trim() === '' ? null : Number(v));
+  const aw = num(a.weight);
+  const bw = num(b.weight);
+  const ac = num(a.count);
+  const bc = num(b.count);
+  const weight = aw !== null && bw !== null ? String(Math.round((aw + bw) * 100) / 100) : aw !== null ? a.weight : b.weight;
+  const count = ac !== null && bc !== null ? String(ac + bc) : '';
+  const lower = b.name.charAt(0).toLowerCase() + b.name.slice(1);
+  return {
+    id: a.id,
+    name: `${a.name} & ${lower}`,
+    weight,
+    count,
+    members: [...(a.members?.length ? a.members : [a.name]), ...(b.members?.length ? b.members : [b.name])],
+  };
+}

@@ -467,3 +467,66 @@ Writing  = 16.25%`;
     expect(parseWeights('Tests (7) 45%\nQuizzes (7) 15%\nAssignments/Tasks (5) 5%\nFinal Exam 25%\nAttendance 5%\nParticipation 5%')).toHaveLength(6);
   });
 });
+
+import { mergeDraftRows, suggestClass, suggestPart, suggestTarget, type GradeClass } from '../lib/grades';
+
+const cls = (name: string, parts: Part[]): GradeClass => ({ id: name, name, target: 90, parts });
+const part = (name: string, extra: Partial<Part> = {}): Part => ({ id: name, name, weight: 10, scores: [], ...extra });
+
+describe('matching a finished task to a category', () => {
+  const physics = cls('Physics', [part('Tests & Quizzes', { members: ['Tests', 'Quizzes'] }), part('Labs, Assignments, Conversations and Observations'), part('Final Examination')]);
+  const math = cls('Math', [part('Tests'), part('Quizzes'), part('Assignments/Tasks'), part('Final Exam'), part('Attendance', { kind: 'attendance' }), part('Participation')]);
+  const french = cls('French', [part('Listening'), part('Speaking'), part('Reading'), part('Writing'), part('Culminating Task'), part('Written Exam')]);
+
+  it('sends a quiz to the Quizzes member of a merged group, a test to Tests', () => {
+    expect(suggestPart({ type: 'quiz', title: 'Unit 3 Quiz', course: null }, physics)).toMatchObject({ partId: 'Tests & Quizzes', label: 'Quizzes' });
+    expect(suggestPart({ type: 'test', title: 'Unit 3 Test', course: null }, physics)).toMatchObject({ partId: 'Tests & Quizzes', label: 'Tests' });
+  });
+  it('matches separate categories by type and by title words', () => {
+    expect(suggestPart({ type: 'quiz', title: 'Quiz 2', course: null }, math)?.partId).toBe('Quizzes');
+    expect(suggestPart({ type: 'test', title: 'U4 Test', course: null }, math)?.partId).toBe('Tests');
+    expect(suggestPart({ type: 'assignment', title: 'U6 TIPS Assignment', course: null }, math)?.partId).toBe('Assignments/Tasks');
+    expect(suggestPart({ type: 'exam', title: 'Final exam', course: null }, math)?.partId).toBe('Final Exam');
+  });
+  it('uses skill words from the title for a language class', () => {
+    expect(suggestPart({ type: 'assignment', title: 'Listening task 2', course: null }, french)?.partId).toBe('Listening');
+    expect(suggestPart({ type: 'project', title: 'Culminating task', course: null }, french)?.partId).toBe('Culminating Task');
+    expect(suggestPart({ type: 'exam', title: 'Written exam', course: null }, french)?.partId).toBe('Written Exam');
+  });
+  it('prefers a Midterm category over Tests when the title says midterm', () => {
+    const c = cls('Bio', [part('Tests'), part('Midterm')]);
+    expect(suggestPart({ type: 'exam', title: 'Midterm exam', course: null }, c)?.partId).toBe('Midterm');
+  });
+  it('never guesses: no match or a tie gives nothing, and attendance is never chosen', () => {
+    expect(suggestPart({ type: 'project', title: 'Poster', course: null }, math)).toBeNull();
+    expect(suggestPart({ type: 'quiz', title: 'Quiz', course: null }, cls('X', [part('Quizzes A'), part('Quizzes B')]))).toBeNull();
+    expect(suggestPart({ type: 'other', title: 'Attendance sheet', course: null }, math)).toBeNull();
+  });
+  it('picks the class by tag, by title word, or by being the only one', () => {
+    expect(suggestClass({ type: 'quiz', title: 'x', course: 'math' }, [physics, math])?.id).toBe('Math');
+    expect(suggestClass({ type: 'quiz', title: 'French listening quiz', course: null }, [physics, french])?.id).toBe('French');
+    expect(suggestClass({ type: 'quiz', title: 'a quiz', course: null }, [physics])?.id).toBe('Physics');
+    expect(suggestClass({ type: 'quiz', title: 'a quiz', course: null }, [physics, math])).toBeNull();
+  });
+  it('combines class and category in one suggestion with a reason', () => {
+    const s = suggestTarget({ type: 'quiz', title: 'Unit 3 Quiz', course: 'Physics' }, [physics, math])!;
+    expect(s).toMatchObject({ classId: 'Physics', partId: 'Tests & Quizzes', label: 'Quizzes' });
+    expect(s.reason).toMatch(/quiz/);
+    expect(suggestTarget({ type: 'quiz', title: 'x', course: null }, [])).toBeNull();
+  });
+});
+
+describe('combining setup rows', () => {
+  const row = (name: string, weight = '', count = ''): { id: string; name: string; weight: string; count: string } => ({ id: name, name, weight, count });
+  it('adds totals and counts and names the group', () => {
+    expect(mergeDraftRows(row('Tests', '30', '4'), row('Quizzes', '10', '6'))).toEqual({ id: 'Tests', name: 'Tests & quizzes', weight: '40', count: '10', members: ['Tests', 'Quizzes'] });
+  });
+  it('keeps the one weight that is set and drops a half-known count', () => {
+    expect(mergeDraftRows(row('Tests', '', '4'), row('Quizzes', '10', ''))).toMatchObject({ weight: '10', count: '' });
+    expect(mergeDraftRows(row('Tests'), row('Quizzes'))).toMatchObject({ weight: '', count: '' });
+  });
+  it('avoids float noise and refuses attendance', () => {
+    expect(mergeDraftRows(row('A', '16.25'), row('B', '16.25'))?.weight).toBe('32.5');
+    expect(mergeDraftRows(row('Attendance', '5'), row('Tests', '5'))).toBeNull();
+  });
+});

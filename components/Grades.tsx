@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   currentGrade, formatScore, isAttendanceName, itemCount, letter, mergeParts, neededScore, parseScore, partGrade, perItem, splitPart,
-  summary, toScore, weightTotal, weightWarning,
+  mergeDraftRows, suggestPart, suggestTarget, summary, toScore, weightTotal, weightWarning,
   type AwaitingItem, type GradeBook, type GradeClass, type Part,
 } from '@/lib/grades';
 
@@ -10,10 +10,13 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const r1 = (n: number) => Math.round(n * 10) / 10;
 const JSON_HEADERS = { 'content-type': 'application/json' };
 
-interface DraftPart { id: string; name: string; weight: string; count: string }
+interface DraftPart { id: string; name: string; weight: string; count: string; members?: string[] }
 interface Draft { name: string; parts: DraftPart[]; note: string }
 const emptyDraft = (): Draft => ({ name: '', parts: [], note: '' });
-const CHIPS = ['Tests', 'Quizzes', 'Homework', 'Projects', 'Midterm', 'Final', 'Attendance', 'Participation'];
+const CHIP_SETS: Record<string, string[]> = {
+  Common: ['Tests', 'Quizzes', 'Tests & Quizzes', 'Assignments', 'Homework', 'Projects', 'Labs', 'Midterm', 'Final Exam', 'Attendance', 'Participation'],
+  Languages: ['Listening', 'Speaking', 'Reading', 'Writing', 'Culminating Task', 'Written Exam', 'Oral', 'Attendance', 'Participation'],
+};
 const numOrNull = (v: string) => (v === '' ? null : Math.max(0, Number(v) || 0));
 
 export default function Grades() {
@@ -25,9 +28,11 @@ export default function Grades() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [syllabus, setSyllabus] = useState('');
   const [reading, setReading] = useState(false);
-  const [entering, setEntering] = useState<{ id: string; classId: string; partId: string; score: string } | null>(null);
+  const [entering, setEntering] = useState<{ id: string; classId: string; partId: string; label: string; score: string; reason: string } | null>(null);
   const [newScore, setNewScore] = useState<Record<string, string>>({});
   const [newLabel, setNewLabel] = useState<Record<string, string>>({});
+  const [chipSet, setChipSet] = useState<keyof typeof CHIP_SETS>('Common');
+  const [focusId, setFocusId] = useState('');
   const [scoreErr, setScoreErr] = useState<Record<string, string>>({});
   const [drag, setDrag] = useState<{ id: string; name: string; x: number; y: number; over: string | null } | null>(null);
   const [status, setStatus] = useState('');
@@ -182,7 +187,7 @@ export default function Grades() {
       const base = { id: uid(), name: p.name.trim(), weight: p.weight === '' ? null : Number(p.weight), scores: [] as Part['scores'] };
       return isAttendanceName(p.name)
         ? { ...base, kind: 'attendance' as const, lates: 0, absences: 0, lateCost: null, absenceCost: null, participation: null }
-        : { ...base, count: p.count === '' ? null : Math.min(50, Math.max(1, Math.round(Number(p.count)))) };
+        : { ...base, count: p.count === '' ? null : Math.min(50, Math.max(1, Math.round(Number(p.count)))), ...(p.members && p.members.length > 1 ? { members: p.members } : {}) };
     });
     const c: GradeClass = { id: uid(), name: draft.name.trim(), target: 90, parts };
     changeBook({ classes: [...book.classes, c] });
@@ -196,15 +201,20 @@ export default function Grades() {
   };
 
   const startEntering = (a: AwaitingItem) => {
-    const match = book.classes.find((c) => a.course && c.name.toLowerCase() === a.course.toLowerCase()) ?? book.classes[0];
-    setEntering({ id: a.id, classId: match?.id ?? '', partId: match?.parts[0]?.id ?? '', score: '' });
+    const sug = suggestTarget({ type: a.type, title: a.title, course: a.course }, book.classes);
+    const cls0 = book.classes.find((c) => c.id === sug?.classId) ?? book.classes[0] ?? null;
+    const part0 = cls0?.parts.find((p) => p.id === sug?.partId);
+    setEntering({
+      id: a.id, classId: cls0?.id ?? '', partId: part0?.id ?? '', label: sug?.label ?? '', score: '',
+      reason: part0 ? `Suggested: ${part0.name}${sug?.label ? ` (${sug.label})` : ''}, because ${sug?.reason}.` : '',
+    });
   };
   const submitScore = async () => {
     if (!entering || !entering.classId || !entering.partId || entering.score === '') return;
     await saveNow(); // the server adds to the saved gradebook, so save pending edits first
     const res = await fetch(`/api/awaiting/${entering.id}`, {
       method: 'POST', headers: JSON_HEADERS,
-      body: JSON.stringify({ classId: entering.classId, partId: entering.partId, score: entering.score }),
+      body: JSON.stringify({ classId: entering.classId, partId: entering.partId, score: entering.score, label: ePart && (ePart.members?.length ?? 0) > 1 ? entering.label || ePart.members![0] : undefined }),
     });
     if (res.ok) { setEntering(null); dirty.current = false; refresh(); } else setStatus(((await res.json().catch(() => ({}))) as { error?: string }).error ?? 'Could not log that score');
   };
@@ -214,6 +224,7 @@ export default function Grades() {
   };
 
   const eClass = entering ? book.classes.find((c) => c.id === entering.classId) : null;
+  const ePart = eClass?.parts.find((p) => p.id === entering?.partId);
 
   return (
     <section className="card grades" aria-label="Grades">
@@ -238,14 +249,27 @@ export default function Grades() {
                         <>
                           <select value={entering.classId} aria-label="Class" onChange={(e) => {
                             const c = book.classes.find((x) => x.id === e.target.value);
-                            setEntering({ ...entering, classId: e.target.value, partId: c?.parts[0]?.id ?? '' });
+                            const sp = c ? suggestPart({ type: a.type, title: a.title, course: a.course }, c) : null;
+                            const pn = c?.parts.find((x) => x.id === sp?.partId);
+                            setEntering({ ...entering, classId: e.target.value, partId: sp?.partId ?? '', label: sp?.label ?? '',
+                              reason: pn ? `Suggested: ${pn.name}${sp?.label ? ` (${sp.label})` : ''}, because ${sp?.reason}.` : '' });
                           }}>{book.classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-                          <select value={entering.partId} aria-label="Which part" onChange={(e) => setEntering({ ...entering, partId: e.target.value })}>
-                            {(eClass?.parts ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                          <select value={entering.partId} aria-label="Which part" onChange={(e) => {
+                            const pt = eClass?.parts.find((x) => x.id === e.target.value);
+                            setEntering({ ...entering, partId: e.target.value, label: pt?.members?.[0] ?? '', reason: '' });
+                          }}>
+                            <option value="" disabled>Choose a category</option>
+                            {(eClass?.parts ?? []).filter((p) => p.kind !== 'attendance').map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                           </select>
+                          {ePart && (ePart.members?.length ?? 0) > 1 && (
+                            <select value={entering.label || ePart.members![0]} aria-label="Which member" onChange={(e) => setEntering({ ...entering, label: e.target.value })}>
+                              {ePart.members!.map((m) => <option key={m} value={m}>{m}</option>)}
+                            </select>
+                          )}
                           <input inputMode="decimal" placeholder="86 or 43/50" aria-label="Score" value={entering.score}
                             onChange={(e) => setEntering({ ...entering, score: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && submitScore()} />
-                          <button className="btn" onClick={submitScore} disabled={!entering.partId || entering.score === ''}>Save score</button>
+                          <button className="btn" onClick={submitScore} disabled={!entering.partId || entering.score.trim() === ''}>Save score</button>
+                          <div className="muted enter-note">{entering.reason || (entering.partId ? '' : 'Choose which category this score belongs to.')}</div>
                         </>
                       )}
                       <button className="btn ghost" onClick={() => setEntering(null)}>Cancel</button>
@@ -291,24 +315,57 @@ export default function Grades() {
                     {book.classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 )}
-                <div className="chips" aria-label="Quick add a category">
-                  {CHIPS.map((c) => (
-                    <button key={c} className="chip" onClick={() => setD({ parts: [...d.parts, { id: uid(), name: c, weight: '', count: '' }] })}>+ {c}</button>
-                  ))}
+                <div className="quickadd">
+                  <div className="quickhead">
+                    <span className="muted">Quick add</span>
+                    <div className="seg" role="group" aria-label="Suggestion set">
+                      {Object.keys(CHIP_SETS).map((k) => <button key={k} className={chipSet === k ? 'on' : ''} onClick={() => setChipSet(k)}>{k}</button>)}
+                    </div>
+                  </div>
+                  <div className="chips" aria-label="Quick add a category">
+                    {CHIP_SETS[chipSet].map((c) => (
+                      <button key={c} className="chip" onClick={() => setD({ parts: [...d.parts, { id: uid(), name: c, weight: '', count: '', ...(c === 'Tests & Quizzes' ? { members: ['Tests', 'Quizzes'] } : {}) }] })}>+ {c}</button>
+                    ))}
+                    <button className="chip own" onClick={() => { const id = uid(); setFocusId(id); setD({ parts: [...d.parts, { id, name: '', weight: '', count: '' }] }); }}>+ Your own</button>
+                  </div>
+                  {(() => {
+                    const others = [...new Set(book.classes.flatMap((c) => c.parts.map((x) => x.name)))].filter((n) => !CHIP_SETS[chipSet].includes(n) && !isAttendanceName(n)).slice(0, 12);
+                    return others.length > 0 && (
+                      <div className="chips" aria-label="Names from your other classes">
+                        <span className="muted">From your other classes</span>
+                        {others.map((c) => <button key={c} className="chip" onClick={() => setD({ parts: [...d.parts, { id: uid(), name: c, weight: '', count: '' }] })}>+ {c}</button>)}
+                      </div>
+                    );
+                  })()}
+                  <div className="muted">To combine two categories, such as Tests and Quizzes, use Combine with… on a row. After saving you can also hold ⋮⋮ and drag one onto another.</div>
                 </div>
                 {d.parts.length > 0 && (
                   <div className="parts-edit">
                     <div className="prow phead"><span>Category</span><span>Total %</span><span># items</span><span /></div>
                     {d.parts.map((p, i) => (
-                      <div key={p.id} className="prow">
-                        <input placeholder="e.g. Tests" value={p.name} aria-label="Category name" maxLength={60}
-                          onChange={(e) => setD({ parts: d.parts.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
-                        <input type="number" inputMode="decimal" placeholder="%" value={p.weight} aria-label="Total weight percent" min={0} max={100}
-                          onChange={(e) => setD({ parts: d.parts.map((x, j) => (j === i ? { ...x, weight: e.target.value } : x)) })} />
-                        <input type="number" inputMode="numeric" placeholder="?" value={p.count} aria-label="Number of items" min={1} max={50}
-                          title="How many are there this semester? Check the syllabus or ask your teacher. Leave blank if you don't know."
-                          onChange={(e) => setD({ parts: d.parts.map((x, j) => (j === i ? { ...x, count: e.target.value } : x)) })} />
-                        <button className="x" onClick={() => setD({ parts: d.parts.filter((_, j) => j !== i) })} aria-label="Remove category">×</button>
+                      <div key={p.id} className="drow">
+                        <div className="prow">
+                          <input placeholder="e.g. Tests" value={p.name} aria-label="Category name" maxLength={60} autoFocus={focusId === p.id}
+                            onChange={(e) => setD({ parts: d.parts.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
+                          <input type="number" inputMode="decimal" placeholder="%" value={p.weight} aria-label="Total weight percent" min={0} max={100}
+                            onChange={(e) => setD({ parts: d.parts.map((x, j) => (j === i ? { ...x, weight: e.target.value } : x)) })} />
+                          <input type="number" inputMode="numeric" placeholder="?" value={p.count} aria-label="Number of items" min={1} max={50}
+                            title="How many are there this semester? Check the syllabus or ask your teacher. Leave blank if you don't know."
+                            onChange={(e) => setD({ parts: d.parts.map((x, j) => (j === i ? { ...x, count: e.target.value } : x)) })} />
+                          <button className="x" onClick={() => setD({ parts: d.parts.filter((_, j) => j !== i) })} aria-label="Remove category">×</button>
+                        </div>
+                        {(p.members?.length ?? 0) > 1 && <div className="members">{p.members!.map((m) => <span key={m} className="mchip">{m}</span>)}</div>}
+                        {d.parts.length > 1 && !isAttendanceName(p.name) && (
+                          <select className="combine" value="" aria-label={`Combine ${p.name || 'this row'} with another row`}
+                            onChange={(e) => {
+                              const other = d.parts.find((x) => x.id === e.target.value);
+                              const m = other ? mergeDraftRows(p, other) : null;
+                              if (m) setD({ parts: d.parts.filter((x) => x.id !== other!.id).map((x) => (x.id === p.id ? m : x)) });
+                            }}>
+                            <option value="">Combine with…</option>
+                            {d.parts.filter((x) => x.id !== p.id && !isAttendanceName(x.name)).map((x) => <option key={x.id} value={x.id}>{x.name || 'Unnamed row'}</option>)}
+                          </select>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -384,6 +441,13 @@ export default function Grades() {
                         <button className="x" onClick={() => edit((c) => ({ ...c, parts: c.parts.filter((x) => x.id !== p.id) }))} aria-label={`Remove ${p.name}`}>×</button>
                       </div>
 
+                      {!att && others.length > 0 && (
+                        <select className="combine" value="" aria-label={`Combine ${p.name} with another category`}
+                          onChange={(e) => e.target.value && combine(p.id, e.target.value)}>
+                          <option value="">Combine with…</option>
+                          {others.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                        </select>
+                      )}
                       {merged && (
                         <div className="members">
                           {members.map((m) => <span key={m} className="mchip">{m}</span>)}
@@ -438,13 +502,6 @@ export default function Grades() {
                         </>
                       )}
 
-                      {!att && others.length > 0 && (
-                        <select className="combine" value="" aria-label={`Combine ${p.name} with another category`}
-                          onChange={(e) => e.target.value && combine(p.id, e.target.value)}>
-                          <option value="">Combine with…</option>
-                          {others.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                        </select>
-                      )}
                     </div>
                   );
                 })}
