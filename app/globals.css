@@ -151,7 +151,12 @@ textarea.notes { min-height: 120px; resize: vertical; }
 .whatif-banner button { background: transparent; border: 1px solid var(--med); color: var(--med); border-radius: 6px; padding: 2px 8px; margin-left: 6px; }
 .plist { display: flex; flex-direction: column; gap: 8px; }
 .pcard { padding: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; display: flex; flex-direction: column; gap: 6px; }
-.prow { display: grid; grid-template-columns: 1fr 76px auto; gap: 6px; align-items: center; }
+.prow { display: grid; grid-template-columns: 1fr 64px 64px auto; gap: 6px; align-items: center; }
+.phead { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+.phead span:nth-child(2), .phead span:nth-child(3) { padding-left: 4px; }
+.parts-edit { display: flex; flex-direction: column; gap: 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips .chip { cursor: pointer; }
 .scores { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .schip { background: var(--surface-2); border: 1px solid var(--line); color: var(--text); border-radius: 999px; padding: 1px 8px; font-size: 12px; }
 .snew { width: 96px !important; padding: 3px 6px; }

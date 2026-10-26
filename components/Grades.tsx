@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  currentGrade, letter, neededScore, partGrade, summary, weightTotal, weightWarning,
+  currentGrade, itemCount, letter, neededScore, partGrade, perItem, summary, weightTotal, weightWarning,
   type AwaitingItem, type GradeBook, type GradeClass, type Part,
 } from '@/lib/grades';
 
@@ -9,8 +9,10 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const r1 = (n: number) => Math.round(n * 10) / 10;
 const JSON_HEADERS = { 'content-type': 'application/json' };
 
-interface Draft { name: string; parts: { id: string; name: string; weight: string }[]; note: string }
-const emptyDraft = (): Draft => ({ name: '', parts: [{ id: uid(), name: '', weight: '' }], note: '' });
+interface DraftPart { id: string; name: string; weight: string; count: string }
+interface Draft { name: string; parts: DraftPart[]; note: string }
+const emptyDraft = (): Draft => ({ name: '', parts: [], note: '' });
+const CHIPS = ['Tests', 'Quizzes', 'Homework', 'Projects', 'Midterm', 'Final', 'Participation'];
 
 export default function Grades() {
   const [book, setBook] = useState<GradeBook>({ classes: [] });
@@ -91,7 +93,7 @@ export default function Grades() {
     const d = await res.json().catch(() => ({}));
     setReading(false);
     if (!res.ok) return setDraft((x) => ({ ...(x ?? emptyDraft()), note: d.error || 'Could not read that.' }));
-    const parts = (d.parts as { name: string; weight: number }[]).map((p) => ({ id: uid(), name: p.name, weight: String(p.weight) }));
+    const parts = (d.parts as { name: string; weight: number; count?: number }[]).map((p) => ({ id: uid(), name: p.name, weight: String(p.weight), count: p.count ? String(p.count) : '' }));
     setDraft((x) => ({
       name: x?.name || d.name || '',
       parts: parts.length ? parts : x?.parts ?? [],
@@ -103,7 +105,7 @@ export default function Grades() {
 
   const createClass = () => {
     if (!draft || !draft.name.trim()) return;
-    const parts: Part[] = draft.parts.filter((p) => p.name.trim()).map((p) => ({ id: uid(), name: p.name.trim(), weight: p.weight === '' ? null : Number(p.weight), scores: [] }));
+    const parts: Part[] = draft.parts.filter((p) => p.name.trim()).map((p) => ({ id: uid(), name: p.name.trim(), weight: p.weight === '' ? null : Number(p.weight), count: p.count === '' ? null : Math.min(50, Math.max(1, Math.round(Number(p.count)))), scores: [] }));
     const c: GradeClass = { id: uid(), name: draft.name.trim(), target: 90, parts };
     changeBook({ classes: [...book.classes, c] });
     setSel(c.id); setDraft(null); setSyllabus('');
@@ -202,20 +204,40 @@ export default function Grades() {
                   onChange={(e) => setSyllabus(e.target.value)} aria-label="Syllabus text" />
                 <button className="btn ghost" onClick={readSyllabus} disabled={reading || !syllabus.trim()}>{reading ? 'Reading…' : 'Read syllabus'}</button>
                 {d.note && <div className="muted">{d.note}</div>}
-                <div className="parts-edit">
-                  {d.parts.map((p, i) => (
-                    <div key={p.id} className="prow">
-                      <input placeholder="Part, e.g. Midterm" value={p.name} aria-label="Part name" maxLength={40}
-                        onChange={(e) => setD({ parts: d.parts.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
-                      <input type="number" inputMode="decimal" placeholder="%" value={p.weight} aria-label="Weight percent" min={0} max={100}
-                        onChange={(e) => setD({ parts: d.parts.map((x, j) => (j === i ? { ...x, weight: e.target.value } : x)) })} />
-                      <button className="x" onClick={() => setD({ parts: d.parts.filter((_, j) => j !== i) })} aria-label="Remove part">×</button>
-                    </div>
+                {book.classes.length > 0 && (
+                  <select aria-label="Start from another class" value="" onChange={(e) => {
+                    const src = book.classes.find((c) => c.id === e.target.value);
+                    if (src) setD({ parts: src.parts.map((x) => ({ id: uid(), name: x.name, weight: x.weight === null ? '' : String(x.weight), count: x.count ? String(x.count) : '' })) });
+                  }}>
+                    <option value="">Start from another class…</option>
+                    {book.classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                )}
+                <div className="chips" aria-label="Quick add a category">
+                  {CHIPS.map((c) => (
+                    <button key={c} className="chip" onClick={() => setD({ parts: [...d.parts, { id: uid(), name: c, weight: '', count: '' }] })}>+ {c}</button>
                   ))}
                 </div>
+                {d.parts.length > 0 && (
+                  <div className="parts-edit">
+                    <div className="prow phead"><span>Category</span><span>Total %</span><span># items</span><span /></div>
+                    {d.parts.map((p, i) => (
+                      <div key={p.id} className="prow">
+                        <input placeholder="e.g. Tests" value={p.name} aria-label="Category name" maxLength={40}
+                          onChange={(e) => setD({ parts: d.parts.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
+                        <input type="number" inputMode="decimal" placeholder="%" value={p.weight} aria-label="Total weight percent" min={0} max={100}
+                          onChange={(e) => setD({ parts: d.parts.map((x, j) => (j === i ? { ...x, weight: e.target.value } : x)) })} />
+                        <input type="number" inputMode="numeric" placeholder="?" value={p.count} aria-label="Number of items" min={1} max={50}
+                          title="How many are there this semester? Check the syllabus or ask your teacher. Leave blank if you don't know."
+                          onChange={(e) => setD({ parts: d.parts.map((x, j) => (j === i ? { ...x, count: e.target.value } : x)) })} />
+                        <button className="x" onClick={() => setD({ parts: d.parts.filter((_, j) => j !== i) })} aria-label="Remove category">×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="row">
-                  <button className="btn ghost" onClick={() => setD({ parts: [...d.parts, { id: uid(), name: '', weight: '' }] })}>Add part</button>
-                  <span className={Math.abs(sum - 100) < 0.01 ? 'good' : 'muted'}>Weights total {r1(sum)}%</span>
+                  <button className="btn ghost" onClick={() => setD({ parts: [...d.parts, { id: uid(), name: '', weight: '', count: '' }] })}>Add category</button>
+                  <span className={Math.abs(sum - 100) < 0.01 ? 'good' : 'muted'}>Weights total {r1(sum)}%{sum < 100 && sum > 0 ? ` (${r1(100 - sum)}% left)` : ''}</span>
                 </div>
                 <div className="row">
                   <button className="btn" onClick={createClass} disabled={!d.name.trim()}>Save class</button>
@@ -252,16 +274,24 @@ export default function Grades() {
                   {need.status === 'needed' && `You need about ${need.score}% on the remaining ${r1(need.remaining)}% to finish at ${view.target}%.${need.approximate ? ' (Approximate, weights do not add to 100%.)' : ''}`}
                 </div>
               )}
+              {need?.status === 'needed' && need.assumed && (
+                <div className="muted">Some categories have no item count, so their scores so far are treated as the whole category.</div>
+              )}
               {warn && <div className="muted">{warn}</div>}
               <div className="plist">
+                {view.parts.length > 0 && <div className="prow phead"><span>Category</span><span>Total %</span><span># items</span><span /></div>}
                 {view.parts.map((p) => {
                   const g = partGrade(p);
+                  const each = perItem(p);
                   return (
                     <div key={p.id} className="pcard">
                       <div className="prow">
                         <input value={p.name} aria-label="Part name" maxLength={40} onChange={(e) => setPart(p.id, { name: e.target.value })} />
                         <input type="number" inputMode="decimal" placeholder="Set %" value={p.weight ?? ''} aria-label={`${p.name} weight percent`} min={0} max={100}
                           onChange={(e) => setPart(p.id, { weight: e.target.value === '' ? null : Number(e.target.value) })} />
+                        <input type="number" inputMode="numeric" placeholder="?" value={p.count ?? ''} aria-label={`${p.name} number of items`} min={1} max={50}
+                          title="How many are there this semester? Check the syllabus or ask your teacher. Leave blank if you don't know."
+                          onChange={(e) => setPart(p.id, { count: e.target.value === '' ? null : Math.min(50, Math.max(1, Math.round(Number(e.target.value)))) })} />
                         <button className="x" onClick={() => edit((c) => ({ ...c, parts: c.parts.filter((x) => x.id !== p.id) }))} aria-label={`Remove ${p.name}`}>×</button>
                       </div>
                       <div className="scores">
@@ -279,6 +309,11 @@ export default function Grades() {
                           }} />
                         <span className="muted">{g === null ? 'not graded yet' : `avg ${r1(g)}%`}</span>
                       </div>
+                      {p.count ? (
+                        <div className="muted">{p.scores.length} of {itemCount(p)} graded{each !== null ? ` · each ≈ ${r1(each)}%` : ''}</div>
+                      ) : p.scores.length > 0 ? (
+                        <div className="muted">No item count set, so these scores count as the whole category.</div>
+                      ) : null}
                     </div>
                   );
                 })}

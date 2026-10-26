@@ -264,7 +264,7 @@ Quizzes (best 4 of 5) - 15 percent
 Attendance and good vibes`);
     expect(got).toEqual([
       { name: 'Homework', weight: 20 },
-      { name: 'Quizzes (best 4 of 5)', weight: 15 },
+      { name: 'Quizzes (best 4 of 5)', weight: 15, count: 5 },
       { name: 'Midterm Exam', weight: 25 },
       { name: 'Final Exam', weight: 40 },
     ]);
@@ -277,5 +277,38 @@ Attendance and good vibes`);
     expect(book.classes[0].parts[0].scores).toEqual([80]);
     expect(addScore(book, 'c', 'Quizzes', 140).classes[0].parts[0].scores).toEqual([80, 100]);
     expect(summary(next.classes[0])).toBe('Bio 90% (A-)');
+  });
+});
+
+import { itemCount, perItem } from '../lib/grades';
+
+describe('category item counts', () => {
+  const tests = (scores: number[], count?: number | null): Part => ({ id: 't', name: 'Tests', weight: 40, count, scores });
+  it('treats one of four tests as a quarter of the category', () => {
+    const parts = [tests([90], 4), P('Final', 60)];
+    expect(currentGrade(parts)).toBe(90);
+    // earned 10 of 100; remaining 30 + 60 = 90; to finish at 85: (8500-900)/90 = 84.4
+    expect(neededScore(parts, 85)).toMatchObject({ status: 'needed', score: 84.4, remaining: 90, assumed: false });
+    expect(perItem(tests([], 4))).toBe(10);
+  });
+  it('without a count the scores so far stand for the whole category (old behavior) and says so', () => {
+    const parts = [tests([90]), P('Final', 60)];
+    expect(neededScore(parts, 85)).toMatchObject({ status: 'needed', remaining: 60, assumed: true });
+    expect(perItem(tests([90]))).toBeNull();
+  });
+  it('raises a too-small count to the scores logged', () => {
+    expect(itemCount(tests([80, 90, 100], 2))).toBe(3);
+    expect(neededScore([tests([80, 90, 100], 2)], 90)).toEqual({ status: 'none' });
+  });
+  it('a finished category leaves nothing remaining', () => {
+    expect(neededScore([tests([80, 90, 100, 70], 4), P('Final', 60, 85)], 90)).toEqual({ status: 'none' });
+  });
+  it('reads counts from syllabus lines', () => {
+    expect(parseWeights('Tests (4) 40%\n3 quizzes - 15%\ntwo exams: 30%\nHomework 15%')).toEqual([
+      { name: 'Tests', weight: 40, count: 4 },
+      { name: 'Quizzes', weight: 15, count: 3 },
+      { name: 'Exams', weight: 30, count: 2 },
+      { name: 'Homework', weight: 15 },
+    ]);
   });
 });
