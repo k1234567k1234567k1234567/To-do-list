@@ -1,11 +1,21 @@
 /** Grade math. Pure functions only; weights always come from the user (or their syllabus), never from guesses. */
 
+/** A bare number is a percent. `{ e, p }` is points earned out of points possible; `label` records which merged member it belongs to. */
+export type Score = number | { e: number; p: number; label?: string };
+
 export interface Part {
   id: string;
   name: string;
   weight: number | null; // percent of the final grade for the whole category; null until the user sets it
   count?: number | null; // how many items the category will have (e.g. 4 tests); unknown when empty
-  scores: number[]; // percent scores logged so far; several are averaged
+  scores: Score[]; // scores logged so far; a category's grade is total earned / total possible
+  members?: string[]; // names of the categories merged into this one (e.g. Tests, Quizzes)
+  kind?: 'scores' | 'attendance'; // attendance starts full and loses a share per unexcused late/absence
+  lates?: number;
+  absences?: number;
+  lateCost?: number | null; // percent of attendance lost per unexcused late
+  absenceCost?: number | null; // percent of attendance lost per unexcused absence
+  participation?: number | null; // optional participation score averaged into a combined attendance category
 }
 
 export interface GradeClass {
@@ -29,8 +39,49 @@ export interface AwaitingItem {
 
 const hasWeight = (p: Part): p is Part & { weight: number } => typeof p.weight === 'number' && p.weight > 0;
 
+const rid = () => Math.random().toString(36).slice(2, 10);
+
+export function scoreParts(s: Score): { e: number; p: number } {
+  return typeof s === 'number' ? { e: s, p: 100 } : { e: s.e, p: s.p };
+}
+
+/** Read "86", "86%", "43/50" or "8.5 / 10". Percent-style input comes back as { e, p: 100 }. */
+export function parseScore(text: string): { e: number; p: number } | null {
+  const t = text.trim();
+  const frac = /^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/.exec(t);
+  const pct = /^(\d+(?:\.\d+)?)\s*%?$/.exec(t);
+  const e = frac ? Number(frac[1]) : pct ? Number(pct[1]) : NaN;
+  const p = frac ? Number(frac[2]) : 100;
+  if (!Number.isFinite(e) || !(p > 0) || e < 0 || e > p * 2) return null;
+  return { e, p };
+}
+
+/** Store percents as plain numbers (older data) and everything else as points. */
+export function toScore(x: { e: number; p: number }, label?: string): Score {
+  return x.p === 100 && !label ? x.e : { e: x.e, p: x.p, ...(label ? { label } : {}) };
+}
+
+export function formatScore(s: Score): string {
+  const { e, p } = scoreParts(s);
+  const r = (n: number) => String(Math.round(n * 10) / 10);
+  return typeof s === 'number' || p === 100 ? r(e) : `${r(e)}/${r(p)}`;
+}
+
+export function attendanceGrade(p: Part): number {
+  const base = Math.max(0, 100 - (p.lates ?? 0) * (p.lateCost ?? 0) - (p.absences ?? 0) * (p.absenceCost ?? 0));
+  return typeof p.participation === 'number' ? (base + Math.min(100, Math.max(0, p.participation))) / 2 : base;
+}
+
+export function isAttendanceName(name: string): boolean {
+  return /^attendance\b/i.test(name.trim());
+}
+
+/** The category's grade: total points earned over total points possible. Attendance is graded from the start. */
 export function partGrade(p: Part): number | null {
-  return p.scores.length ? p.scores.reduce((a, b) => a + b, 0) / p.scores.length : null;
+  if (p.kind === 'attendance') return attendanceGrade(p);
+  if (!p.scores.length) return null;
+  const t = p.scores.map(scoreParts).reduce((a, x) => ({ e: a.e + x.e, p: a.p + x.p }), { e: 0, p: 0 });
+  return t.p > 0 ? (t.e / t.p) * 100 : null;
 }
 
 /** Items the category is expected to have: the stated count, raised to the scores already logged. */
@@ -46,6 +97,7 @@ export function perItem(p: Part): number | null {
 /** Share of the final grade already graded in this category, and the share still to come. */
 function shares(p: Part): { done: number; left: number; avg: number | null } {
   if (!hasWeight(p)) return { done: 0, left: 0, avg: null };
+  if (p.kind === 'attendance') return { done: p.weight, left: 0, avg: attendanceGrade(p) };
   const n = p.scores.length;
   if (n === 0) return { done: 0, left: p.weight, avg: null };
   // With no stated count the scores so far stand in for the whole category.
@@ -74,7 +126,7 @@ export type Needed =
   | { status: 'none' } // nothing left to grade, or no weights set
   | { status: 'secured' } // target reached even with 0 on the rest
   | { status: 'unreachable'; score: number } // would need more than 100
-  | { status: 'needed'; score: number; remaining: number; approximate: boolean; assumed: boolean };
+  | { status: 'needed'; score: number; remaining: number; approximate: boolean; assumed: boolean; attendance: boolean };
 
 /** Average score needed on everything not yet graded to finish at `target`. */
 export function neededScore(parts: Part[], target: number): Needed {
@@ -82,18 +134,20 @@ export function neededScore(parts: Part[], target: number): Needed {
   let earned = 0;
   let remaining = 0;
   let assumed = false;
+  let attendance = false;
   for (const p of parts) {
     const { done, left, avg } = shares(p);
     earned += done * (avg ?? 0);
     remaining += left;
-    if (hasWeight(p) && p.scores.length > 0 && !(p.count && p.count > 0)) assumed = true;
+    if (hasWeight(p) && p.kind === 'attendance') attendance = true;
+    else if (hasWeight(p) && p.scores.length > 0 && !(p.count && p.count > 0)) assumed = true;
   }
   if (!total || remaining <= 0.0001) return { status: 'none' };
   const need = (target * total - earned) / remaining;
   if (need <= 0) return { status: 'secured' };
   const score = Math.round(need * 10) / 10;
   if (need > 100) return { status: 'unreachable', score };
-  return { status: 'needed', score, remaining, approximate: Math.abs(total - 100) > 0.01, assumed };
+  return { status: 'needed', score, remaining, approximate: Math.abs(total - 100) > 0.01, assumed, attendance };
 }
 
 const BANDS: [number, string][] = [
@@ -128,6 +182,8 @@ function extractCount(raw: string): { name: string; count?: number } {
   return { name: raw };
 }
 
+const TOTAL_ROW = /^(term work|summative( work)?|course work|total|overall|final grade)$/i;
+
 /** Pull "Exams 40%" style lines out of pasted syllabus text. Used when no AI is available. */
 export function parseWeights(text: string): { name: string; weight: number; count?: number }[] {
   const out: { name: string; weight: number; count?: number }[] = [];
@@ -139,19 +195,62 @@ export function parseWeights(text: string): { name: string; weight: number; coun
     if (!m) continue;
     const cleaned = m.name.replace(/[\s:=\-–—(]+$/, '').replace(/\s+/g, ' ').trim();
     const { name, count } = extractCount(cleaned);
-    const finalName = name.slice(0, 40);
+    const finalName = name.slice(0, 60);
+    if (TOTAL_ROW.test(finalName)) continue; // a heading like "Term Work 65%" already adds up its own parts
     if (finalName && m.weight > 0 && m.weight <= 100) out.push(count && count >= 1 && count <= 50 ? { name: finalName, weight: m.weight, count } : { name: finalName, weight: m.weight });
   }
   return out;
 }
 
-/** Add a score to one part, returning a new gradebook. Unknown ids leave it unchanged. */
-export function addScore(book: GradeBook, classId: string, partId: string, score: number): GradeBook {
-  const s = Math.min(100, Math.max(0, score));
+/** Add a score to one part, returning a new gradebook. Percents cap at 100; points keep their own scale. Unknown ids change nothing. */
+export function addScore(book: GradeBook, classId: string, partId: string, score: Score, label?: string): GradeBook {
+  const { e, p } = scoreParts(score);
+  const clean = typeof score === 'number' ? toScore({ e: Math.min(100, Math.max(0, e)), p: 100 }, label) : toScore({ e: Math.max(0, e), p }, label ?? score.label);
   return {
     classes: book.classes.map((c) =>
-      c.id !== classId ? c : { ...c, parts: c.parts.map((p) => (p.id === partId ? { ...p, scores: [...p.scores, s] } : p)) }),
+      c.id !== classId ? c : { ...c, parts: c.parts.map((x) => (x.id === partId ? { ...x, scores: [...x.scores, clean] } : x)) }),
   };
+}
+
+const tag = (s: Score, label: string): Score => {
+  const { e, p } = scoreParts(s);
+  return { e, p, label: typeof s === 'object' && s.label ? s.label : label };
+};
+
+/** Combine two categories into one group ("Tests" + "Quizzes" = "Tests & quizzes"). Attendance cannot be merged. */
+export function mergeParts(a: Part, b: Part): Part | null {
+  if (a.kind === 'attendance' || b.kind === 'attendance') return null;
+  const am = a.members?.length ? a.members : [a.name];
+  const bm = b.members?.length ? b.members : [b.name];
+  const weight = hasWeight(a) && hasWeight(b) ? a.weight + b.weight : hasWeight(a) ? a.weight : hasWeight(b) ? b.weight : null;
+  const count = a.count && b.count ? a.count + b.count : null;
+  const lower = b.name.charAt(0).toLowerCase() + b.name.slice(1);
+  return {
+    id: a.id,
+    name: `${a.name} & ${lower}`,
+    weight,
+    count,
+    members: [...am, ...bm],
+    scores: [
+      ...a.scores.map((s) => tag(s, am[0])),
+      ...b.scores.map((s) => tag(s, bm[0])),
+    ],
+  };
+}
+
+/** Undo a merge: one category per member, each with its own scores. Weights are left for the user to set. */
+export function splitPart(p: Part, makeId: () => string = rid): Part[] {
+  const members = p.members ?? [];
+  if (members.length < 2) return [p];
+  return members.map((name, i) => ({
+    id: i === 0 ? p.id : makeId(),
+    name,
+    weight: null,
+    count: null,
+    scores: p.scores
+      .filter((s) => (typeof s === 'object' && s.label ? s.label === name : i === 0))
+      .map((s) => toScore(scoreParts(s))),
+  }));
 }
 
 /** Class summary line for the collapsed card, e.g. "Bio 91% (A-)". */

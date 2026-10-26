@@ -23,12 +23,12 @@ export async function POST(req: Request) {
       ? (out.parts as { name?: unknown; weight?: unknown; count?: unknown }[])
           .map((p) => {
             const count = Math.round(Number(p.count));
-            return { name: String(p.name ?? '').trim().slice(0, 40), weight: Number(p.weight), ...(count >= 1 && count <= 50 ? { count } : {}) };
+            return { name: String(p.name ?? '').trim().slice(0, 60), weight: Number(p.weight), ...(count >= 1 && count <= 50 ? { count } : {}) };
           })
           .filter((p) => p.name && Number.isFinite(p.weight) && p.weight > 0 && p.weight <= 100)
           .slice(0, 30)
       : [];
-    if (parts.length) return NextResponse.json({ name: typeof out?.name === 'string' ? out.name.slice(0, 40) : null, parts, source: 'ai' });
+    if (parts.length) return NextResponse.json({ name: typeof out?.name === 'string' ? out.name.slice(0, 60) : null, parts, source: 'ai' });
   } catch (err) {
     console.error('Syllabus parse failed, using rules:', err);
   }

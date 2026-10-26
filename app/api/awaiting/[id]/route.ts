@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { isAuthed } from '@/lib/auth';
 import { getStore } from '@/lib/db';
-import { addScore, type AwaitingItem, type GradeBook } from '@/lib/grades';
+import { addScore, parseScore, toScore, type AwaitingItem, type GradeBook } from '@/lib/grades';
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -15,12 +15,12 @@ export async function POST(req: Request, { params }: Ctx) {
   if (!awaiting.some((a) => a.id === id)) return NextResponse.json({ error: 'not found' }, { status: 404 });
 
   if (!body.dismiss) {
-    const score = Number(body.score);
-    if (!Number.isFinite(score) || score < 0 || score > 100) return NextResponse.json({ error: 'score must be 0-100' }, { status: 400 });
+    const parsed = parseScore(String(body.score ?? ''));
+    if (!parsed) return NextResponse.json({ error: 'Enter a score like 86 or 43/50.' }, { status: 400 });
     const book = await store.getKV<GradeBook>('grades', { classes: [] });
     const cls = book.classes.find((c) => c.id === body.classId);
     if (!cls || !cls.parts.some((p) => p.id === body.partId)) return NextResponse.json({ error: 'class or part not found' }, { status: 400 });
-    await store.setKV('grades', addScore(book, body.classId, body.partId, score));
+    await store.setKV('grades', addScore(book, body.classId, body.partId, toScore(parsed)));
   }
   await store.setKV('awaiting', awaiting.filter((a) => a.id !== id));
   return NextResponse.json({ ok: true });

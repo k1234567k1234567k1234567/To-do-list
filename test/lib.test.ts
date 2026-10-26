@@ -312,3 +312,111 @@ describe('category item counts', () => {
     ]);
   });
 });
+
+import { attendanceGrade, formatScore, isAttendanceName, mergeParts, parseScore, splitPart } from '../lib/grades';
+
+describe('points scoring', () => {
+  it('reads percents and fractions, rejects nonsense', () => {
+    expect(parseScore('86')).toEqual({ e: 86, p: 100 });
+    expect(parseScore('86%')).toEqual({ e: 86, p: 100 });
+    expect(parseScore('43/50')).toEqual({ e: 43, p: 50 });
+    expect(parseScore(' 8.5 / 10 ')).toEqual({ e: 8.5, p: 10 });
+    expect(parseScore('12/10')).toEqual({ e: 12, p: 10 }); // extra credit
+    expect(parseScore('5/0')).toBeNull();
+    expect(parseScore('-3')).toBeNull();
+    expect(parseScore('abc')).toBeNull();
+    expect(parseScore('30/10')).toBeNull(); // more than double is a typo
+  });
+  it('weights a big test above a small quiz inside one category', () => {
+    const tq: Part = { id: 'tq', name: 'Tests & quizzes', weight: 40, scores: [{ e: 43, p: 50 }, { e: 9, p: 10 }] };
+    expect(currentGrade([tq])).toBeCloseTo(86.667, 2); // 52/60, not the 88 equal average
+    expect(formatScore({ e: 43, p: 50 })).toBe('43/50');
+    expect(formatScore(86)).toBe('86');
+  });
+  it('mixes plain percents with points consistently', () => {
+    const part: Part = { id: 'x', name: 'X', weight: 10, scores: [90, { e: 5, p: 10 }] };
+    expect(currentGrade([part])).toBeCloseTo((90 + 5) / 110 * 100, 5);
+  });
+  it('adds point scores without clamping them to 100', () => {
+    const book = { classes: [{ id: 'c', name: 'Phys', target: 90, parts: [P('Tests', 40)] }] };
+    expect(addScore(book, 'c', 'Tests', { e: 43, p: 50 }).classes[0].parts[0].scores).toEqual([{ e: 43, p: 50 }]);
+    expect(addScore(book, 'c', 'Tests', 120).classes[0].parts[0].scores).toEqual([100]);
+  });
+});
+
+describe('merge and split', () => {
+  const tests: Part = { id: 't', name: 'Tests', weight: 30, count: 3, scores: [{ e: 40, p: 50 }] };
+  const quizzes: Part = { id: 'q', name: 'Quizzes', weight: 10, count: 5, scores: [{ e: 9, p: 10 }] };
+  it('combines weight, count, members and labeled scores', () => {
+    const m = mergeParts(tests, quizzes)!;
+    expect(m).toMatchObject({ id: 't', name: 'Tests & quizzes', weight: 40, count: 8, members: ['Tests', 'Quizzes'] });
+    expect(m.scores).toEqual([{ e: 40, p: 50, label: 'Tests' }, { e: 9, p: 10, label: 'Quizzes' }]);
+    expect(currentGrade([m])).toBeCloseTo((49 / 60) * 100, 5);
+  });
+  it('keeps one weight when only one side has it, and no count unless both do', () => {
+    const m = mergeParts({ ...tests, weight: null, count: null }, quizzes)!;
+    expect(m.weight).toBe(10);
+    expect(m.count).toBeNull();
+  });
+  it('splits back to the original members with their own scores', () => {
+    let n = 0;
+    const back = splitPart(mergeParts(tests, quizzes)!, () => `new${++n}`);
+    expect(back.map((p) => [p.id, p.name])).toEqual([['t', 'Tests'], ['new1', 'Quizzes']]);
+    expect(back[0].scores).toEqual([{ e: 40, p: 50 }]);
+    expect(back[1].scores).toEqual([{ e: 9, p: 10 }]);
+    expect(back[0].weight).toBeNull();
+  });
+  it('merges a third category into an existing group', () => {
+    const m = mergeParts(mergeParts(tests, quizzes)!, { id: 'l', name: 'Labs', weight: null, scores: [] })!;
+    expect(m.members).toEqual(['Tests', 'Quizzes', 'Labs']);
+    expect(m.name).toBe('Tests & quizzes & labs');
+  });
+  it('refuses to merge attendance and leaves a plain part alone on split', () => {
+    expect(mergeParts(tests, { id: 'a', name: 'Attendance', weight: 5, kind: 'attendance', scores: [] })).toBeNull();
+    expect(splitPart(tests)).toEqual([tests]);
+  });
+});
+
+describe('attendance', () => {
+  const att = (o: Partial<Part>): Part => ({ id: 'a', name: 'Attendance', weight: 5, kind: 'attendance', scores: [], ...o });
+  it('starts full and loses a share per late or absence', () => {
+    expect(attendanceGrade(att({}))).toBe(100);
+    expect(attendanceGrade(att({ lates: 3, lateCost: 2 }))).toBe(94);
+    expect(attendanceGrade(att({ lates: 50, lateCost: 2 }))).toBe(0);
+    expect(attendanceGrade(att({ lates: 80, lateCost: 2 }))).toBe(0); // never negative
+    expect(attendanceGrade(att({ lates: 3, lateCost: null }))).toBe(100); // no cost entered, nothing deducted
+    expect(attendanceGrade(att({ lates: 2, lateCost: 2, absences: 1, absenceCost: 5 }))).toBe(91);
+  });
+  it('averages in a participation score when given', () => {
+    expect(attendanceGrade(att({ lates: 5, lateCost: 2, participation: 80 }))).toBe(85); // (90 + 80) / 2
+  });
+  it('counts toward the grade immediately and leaves nothing remaining', () => {
+    const parts = [att({ lates: 5, lateCost: 2 }), P('Final', 95)];
+    expect(currentGrade(parts)).toBeCloseTo(90, 5);
+    const need = neededScore(parts, 90);
+    expect(need).toMatchObject({ status: 'needed', remaining: 95, attendance: true });
+  });
+  it('recognises attendance names', () => {
+    expect(isAttendanceName('Attendance')).toBe(true);
+    expect(isAttendanceName('attendance & participation')).toBe(true);
+    expect(isAttendanceName('Participation')).toBe(false);
+  });
+});
+
+describe('syllabus text from real courses', () => {
+  it('reads the Math outline with counts', () => {
+    expect(parseWeights('Tests (7) 45%\nQuizzes (7) 15%\nAssignments/Tasks (5) 5%\nFinal Exam 25%\nAttendance 5%\nParticipation 5%')).toEqual([
+      { name: 'Tests', weight: 45, count: 7 },
+      { name: 'Quizzes', weight: 15, count: 7 },
+      { name: 'Assignments/Tasks', weight: 5, count: 5 },
+      { name: 'Final Exam', weight: 25 },
+      { name: 'Attendance', weight: 5 },
+      { name: 'Participation', weight: 5 },
+    ]);
+  });
+  it('keeps combined names intact and skips "Term Work" heading rows', () => {
+    const got = parseWeights('Term Work: 65%\nTests & Quizzes - 40%\nLabs, Assignments, Conversations and Observations - 25%\nAttendance & Participation: 10%\nFinal Examination - 25%');
+    expect(got.map((g) => g.name)).toEqual(['Tests & Quizzes', 'Labs, Assignments, Conversations and Observations', 'Attendance & Participation', 'Final Examination']);
+    expect(got.reduce((a, g) => a + g.weight, 0)).toBe(100);
+  });
+});

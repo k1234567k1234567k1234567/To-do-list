@@ -36,6 +36,8 @@ export default function TodoApp() {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<'priority' | 'due'>('priority');
   const [text, setText] = useState('');
+  const [multi, setMulti] = useState(false);
+  const [progress, setProgress] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [needLogin, setNeedLogin] = useState(false);
@@ -97,7 +99,32 @@ export default function TodoApp() {
     setToast(null);
   };
 
+  /** Several lines at once: sent in small batches so each request stays quick; lines that fail stay in the box. */
+  const addMany = async () => {
+    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 30);
+    if (!lines.length) return;
+    setBusy(true); setError(''); setProgress(`Added 0 of ${lines.length}`);
+    const failed: string[] = [];
+    let done = 0;
+    for (let i = 0; i < lines.length; i += 5) {
+      const chunk = lines.slice(i, i + 5);
+      try {
+        const res = await fetch('/api/tasks', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ texts: chunk, clientDate: toISODate(new Date()) }) });
+        if (!res.ok) throw new Error();
+        const made: Task[] = await res.json();
+        setTasks((ts) => [...ts, ...made]);
+        done += made.length;
+      } catch { failed.push(...chunk); }
+      setProgress(`Added ${done} of ${lines.length}`);
+    }
+    setText(failed.join('\n'));
+    setError(failed.length ? `${failed.length} line${failed.length === 1 ? '' : 's'} did not add. They are still in the box, so you can try again.` : '');
+    if (!failed.length) setMulti(false);
+    setBusy(false);
+  };
+
   const add = async () => {
+    if (multi) return addMany();
     if (!text.trim()) return;
     setBusy(true); setError('');
     try {
@@ -172,10 +199,12 @@ export default function TodoApp() {
         ) : (
           <>
             <div className="add">
-              <textarea placeholder="Describe a task in as much detail as you like… e.g. “Bio exam on chapters 4-6 this Friday” or “Dentist Tuesday 3pm”"
+              <textarea placeholder={multi ? 'One task per line, e.g.\nOct 28 - Unit 3 Test\nNov 4 - Quiz on 4-2 to 4-4' : 'Describe a task in as much detail as you like… e.g. “Bio exam on chapters 4-6 this Friday” or “Dentist Tuesday 3pm”'}
                 value={text} onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) add(); }} />
-              <button className="btn" onClick={add} disabled={busy || !text.trim()}>{busy ? 'Summarizing…' : 'Add'}</button>
+              <button className="btn" onClick={add} disabled={busy || !text.trim()}>{busy ? 'Summarizing…' : multi ? `Add ${Math.min(30, text.split('\n').filter((l) => l.trim()).length)} tasks` : 'Add'}</button>
+              <button className="linkish" onClick={() => { setMulti(!multi); setError(''); setProgress(''); }}>{multi ? 'Add one task' : 'Add several at once'}</button>
+              {progress && multi && <div className="muted">{progress}</div>}
               {error && <div className="err">{error}</div>}
             </div>
             <div className="row">

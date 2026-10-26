@@ -184,3 +184,25 @@ textarea.notes { min-height: 120px; resize: vertical; }
   .btn, .day, .stat { transition: filter .15s, border-color .15s; }
 }
 .row > select { flex: 1 1 140px; width: auto; min-width: 0; }
+
+/* combining categories */
+.prow.g { grid-template-columns: 22px 1fr 64px 64px auto; }
+.grip { background: transparent; border: 0; color: var(--muted); cursor: grab; touch-action: none; user-select: none; padding: 0; font-size: 14px; line-height: 1; letter-spacing: -2px; }
+.grip:hover:not(:disabled) { color: var(--text); }
+.grip:disabled { opacity: .25; cursor: default; }
+.pcard.over { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.pcard.dragging { opacity: .5; }
+body.dragging { user-select: none; cursor: grabbing; }
+.dragghost { position: fixed; z-index: 100; pointer-events: none; background: var(--surface-2); border: 1px solid var(--accent); border-radius: 8px; padding: 4px 10px; box-shadow: 0 6px 20px rgba(0,0,0,.5); font-size: 13px; }
+.members { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mchip { background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 0 8px; font-size: 12px; }
+.linkish { background: transparent; border: 0; color: var(--accent); padding: 0 4px; font-size: 12px; text-decoration: underline; }
+.combine { width: auto; align-self: flex-start; font-size: 12px; padding: 3px 6px; color: var(--muted); }
+.slabel { width: auto; padding: 2px 6px; font-size: 12px; }
+.att { display: flex; flex-direction: column; gap: 8px; }
+.counter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.counter > span:first-child { min-width: 130px; }
+.counter button { background: var(--surface-2); border: 1px solid var(--line); color: var(--text); border-radius: 6px; width: 28px; height: 28px; line-height: 1; }
+.counter b { min-width: 24px; text-align: center; font-variant-numeric: tabular-nums; }
+.cost { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.cost input { width: 64px; padding: 3px 6px; }
