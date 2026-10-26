@@ -165,12 +165,13 @@ export default function Grades() {
     const d = await res.json().catch(() => ({}));
     setReading(false);
     if (!res.ok) return setDraft((x) => ({ ...(x ?? emptyDraft()), note: d.error || 'Could not read that.' }));
+    const skipped = ((d.dropped ?? []) as { name: string; weight: number }[]).map((x) => `${x.name} (${x.weight}%)`);
     const parts = (d.parts as { name: string; weight: number; count?: number }[]).map((p) => ({ id: uid(), name: p.name, weight: String(p.weight), count: p.count ? String(p.count) : '' }));
     setDraft((x) => ({
       name: x?.name || d.name || '',
       parts: parts.length ? parts : x?.parts ?? [],
       note: parts.length
-        ? `${d.source === 'ai' ? 'Read by AI' : 'Read by simple rules'}. Check every weight against your syllabus before saving.`
+        ? `${d.source === 'ai' ? 'Read by AI' : 'Read by simple rules'}.${skipped.length ? ` Skipped ${skipped.join(' and ')} because ${skipped.length === 1 ? 'it adds' : 'they add'} up the lines under ${skipped.length === 1 ? 'it' : 'them'}.` : ''} Check every weight against your syllabus before saving.`
         : 'Found no percentages. Add the parts by hand.',
     }));
   };

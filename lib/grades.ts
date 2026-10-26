@@ -185,8 +185,8 @@ function extractCount(raw: string): { name: string; count?: number } {
 const TOTAL_ROW = /^(term work|summative( work)?|course work|total|overall|final grade)$/i;
 
 /** Pull "Exams 40%" style lines out of pasted syllabus text. Used when no AI is available. */
-export function parseWeights(text: string): { name: string; weight: number; count?: number }[] {
-  const out: { name: string; weight: number; count?: number }[] = [];
+function parseLines(text: string): WeightRow[] {
+  const out: WeightRow[] = [];
   for (const raw of text.split(/\r?\n|;/)) {
     const line = raw.replace(/^[\s\-*•·]+/, '').replace(/^\d+[.)]\s+/, '').trim();
     const lead = /^(\d+(?:\.\d+)?)\s*(?:%|percent)\s*[:\-–—]?\s*(.+)$/i.exec(line);
@@ -200,6 +200,61 @@ export function parseWeights(text: string): { name: string; weight: number; coun
     if (finalName && m.weight > 0 && m.weight <= 100) out.push(count && count >= 1 && count <= 50 ? { name: finalName, weight: m.weight, count } : { name: finalName, weight: m.weight });
   }
   return out;
+}
+
+export interface WeightRow { name: string; weight: number; count?: number }
+
+/** Is there a group of two or more of `pool` adding up to `target`? Works in hundredths to avoid float noise. */
+function hasGroupSum(pool: number[], target: number): boolean {
+  const t = Math.round(target * 100);
+  if (t <= 0 || pool.length < 2) return false;
+  // dp[sum] = largest group size (capped at 2) that reaches this sum
+  const dp = new Map<number, number>([[0, 0]]);
+  for (const w of pool) {
+    const c = Math.round(w * 100);
+    if (c <= 0) continue;
+    for (const [sum, n] of [...dp.entries()]) {
+      const next = sum + c;
+      if (next <= t) dp.set(next, Math.max(dp.get(next) ?? 0, Math.min(2, n + 1)));
+    }
+  }
+  return (dp.get(t) ?? 0) >= 2;
+}
+
+/**
+ * Outlines often list a group total ("Final Evaluations 25%") next to its items, which would count them twice.
+ * When the rows add up to more than 100, drop rows that equal the sum of other rows until they fit.
+ * A total line normally comes before its items, so those matches are preferred. Rows are never changed when the total is 100 or less.
+ */
+export function dropSubtotals(rows: WeightRow[]): { kept: WeightRow[]; dropped: WeightRow[] } {
+  let kept = rows.slice(0, 30);
+  const dropped: WeightRow[] = [];
+  const total = (r: WeightRow[]) => r.reduce((a, x) => a + x.weight, 0);
+  while (total(kept) > 100.01) {
+    const order = kept.map((_, i) => i).sort((a, b) => kept[b].weight - kept[a].weight || a - b);
+    const pick = (laterOnly: boolean) =>
+      order.find((i) => {
+        if (total(kept) - kept[i].weight < 99.99) return false; // removing it would leave too little
+        const pool = kept.filter((_, j) => j !== i && (!laterOnly || j > i)).map((x) => x.weight);
+        return hasGroupSum(pool, kept[i].weight);
+      });
+    const i = pick(true) ?? pick(false);
+    if (i === undefined) break;
+    dropped.push(kept[i]);
+    kept = kept.filter((_, j) => j !== i);
+  }
+  return { kept, dropped };
+}
+
+/** Rows read from pasted syllabus text, plus any lines skipped because they only add up other lines. */
+export function parseWeightsDetailed(text: string): { parts: WeightRow[]; dropped: WeightRow[] } {
+  const { kept, dropped } = dropSubtotals(parseLines(text));
+  return { parts: kept, dropped };
+}
+
+/** Pull "Exams 40%" style lines out of pasted syllabus text. Used when no AI is available. */
+export function parseWeights(text: string): WeightRow[] {
+  return parseWeightsDetailed(text).parts;
 }
 
 /** Add a score to one part, returning a new gradebook. Percents cap at 100; points keep their own scale. Unknown ids change nothing. */

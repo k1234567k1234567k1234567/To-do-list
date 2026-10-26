@@ -420,3 +420,50 @@ describe('syllabus text from real courses', () => {
     expect(got.reduce((a, g) => a + g.weight, 0)).toBe(100);
   });
 });
+
+import { dropSubtotals, parseWeightsDetailed } from '../lib/grades';
+
+describe('subtotal lines in a pasted outline', () => {
+  const FRENCH = `Term Work: 65%
+Final Evaluations: 25%
+Attendance and Participation: 10%
+Listening  = 16.25%
+Culminating Task = 15 %
+Attendance = 5%
+Speaking  = 16.25%
+Written Exam = 10%
+Participation = 5%
+Reading = 16.25%
+
+
+
+
+Writing  = 16.25%`;
+  it('keeps the eight real items and drops the group totals', () => {
+    const { parts, dropped } = parseWeightsDetailed(FRENCH);
+    expect(parts.map((p) => [p.name, p.weight])).toEqual([
+      ['Listening', 16.25], ['Culminating Task', 15], ['Attendance', 5], ['Speaking', 16.25],
+      ['Written Exam', 10], ['Participation', 5], ['Reading', 16.25], ['Writing', 16.25],
+    ]);
+    expect(parts.reduce((a, p) => a + p.weight, 0)).toBeCloseTo(100, 5);
+    expect(dropped.map((d) => d.name)).toEqual(['Final Evaluations', 'Attendance and Participation']);
+  });
+  it('drops the heading, not a same-sized item that comes later', () => {
+    const rows = [{ name: 'Group', weight: 10 }, { name: 'A', weight: 5 }, { name: 'Exam', weight: 10 }, { name: 'B', weight: 5 }, { name: 'Rest', weight: 80 }];
+    expect(dropSubtotals(rows).dropped.map((d) => d.name)).toEqual(['Group']);
+  });
+  it('leaves correct pastes alone, even when one weight equals two others', () => {
+    const exact = [{ name: 'A', weight: 50 }, { name: 'B', weight: 25 }, { name: 'C', weight: 25 }];
+    expect(dropSubtotals(exact)).toEqual({ kept: exact, dropped: [] });
+    const under = [{ name: 'A', weight: 20 }, { name: 'B', weight: 10 }, { name: 'C', weight: 10 }];
+    expect(dropSubtotals(under).dropped).toEqual([]);
+  });
+  it('does not drop anything when no row is a sum of others', () => {
+    const odd = [{ name: 'A', weight: 60 }, { name: 'B', weight: 55 }];
+    expect(dropSubtotals(odd).dropped).toEqual([]);
+  });
+  it('parseWeights still returns just the rows', () => {
+    expect(parseWeights(FRENCH)).toHaveLength(8);
+    expect(parseWeights('Tests (7) 45%\nQuizzes (7) 15%\nAssignments/Tasks (5) 5%\nFinal Exam 25%\nAttendance 5%\nParticipation 5%')).toHaveLength(6);
+  });
+});

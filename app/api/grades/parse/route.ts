@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { isAuthed } from '@/lib/auth';
-import { parseWeights } from '@/lib/grades';
+import { dropSubtotals, parseWeightsDetailed } from '@/lib/grades';
 import { completeJSON } from '@/lib/llm';
 
 /** Turn pasted syllabus text into a draft list of graded parts. Nothing is saved here. */
@@ -15,6 +15,7 @@ export async function POST(req: Request) {
       'Read a course syllabus excerpt and return JSON {"name": string or null, "parts": [{"name": string, "weight": number, "count": integer or null}]}. ' +
         'Each part is a graded category or item with an explicit percentage of the final grade. Only use percentages that appear in the text. ' +
         'The count is how many items the category has when the text says so ("4 quizzes", "best 4 of 5" means 5), otherwise null. ' +
+        'If a line is only the total of other listed lines (for example "Final Evaluations 25%" above its two items), leave it out and keep the individual items. ' +
         'Do not invent parts or guess weights or counts. If an item has no percentage, leave it out. Output JSON only.',
       input,
       25000,
@@ -28,10 +29,13 @@ export async function POST(req: Request) {
           .filter((p) => p.name && Number.isFinite(p.weight) && p.weight > 0 && p.weight <= 100)
           .slice(0, 30)
       : [];
-    if (parts.length) return NextResponse.json({ name: typeof out?.name === 'string' ? out.name.slice(0, 60) : null, parts, source: 'ai' });
+    if (parts.length) {
+      const { kept, dropped } = dropSubtotals(parts);
+      return NextResponse.json({ name: typeof out?.name === 'string' ? out.name.slice(0, 60) : null, parts: kept, dropped, source: 'ai' });
+    }
   } catch (err) {
     console.error('Syllabus parse failed, using rules:', err);
   }
-  const parts = parseWeights(input);
-  return NextResponse.json({ name: null, parts, source: 'rules' });
+  const { parts, dropped } = parseWeightsDetailed(input);
+  return NextResponse.json({ name: null, parts, dropped, source: 'rules' });
 }
